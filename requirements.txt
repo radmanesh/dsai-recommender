@@ -1,0 +1,31 @@
+# Core LlamaIndex packages
+llama-index-core>=0.10.0
+llama-index-embeddings-huggingface>=0.2.0
+llama-index-llms-huggingface>=0.1.0
+llama-index-llms-huggingface-api>=0.1.0
+llama-index-vector-stores-chroma>=0.1.0
+
+# Vector database
+chromadb>=0.4.0
+
+# LangChain for agent orchestration
+langchain>=0.1.0
+langchain-core>=0.1.0
+
+# Utilities
+pandas>=2.0.0
+python-dotenv>=1.0.0
+nest-asyncio>=1.5.0
+
+# PDF processing
+pypdf>=3.17.0
+pdfplumber>=0.10.0
+
+# Additional dependencies
+sentence-transformers>=2.2.0
+torch>=2.0.0
+transformers>=4.35.0
+accelerate>=0.24.0
+bitsandbytes>=0.41.0
+psutil>=5.9.0
+
