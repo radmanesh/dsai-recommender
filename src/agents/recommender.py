@@ -105,6 +105,7 @@ class RecommendationAgent:
     ) -> str:
         """
         Generate a natural language explanation for why this faculty is recommended.
+        Incorporates PDF support information if available.
 
         Args:
             match: The faculty match.
@@ -113,6 +114,19 @@ class RecommendationAgent:
         Returns:
             str: Explanation text.
         """
+        # Build faculty information string
+        faculty_info = f"Name: {match.faculty_name or 'Faculty Member'}\n{match.text[:500]}"
+
+        # Add PDF support information if available
+        if match.pdf_support:
+            faculty_info += "\n\nAdditional Information from Documents:"
+            for pdf_info in match.pdf_support:
+                if pdf_info.get('summary'):
+                    summary = pdf_info['summary'][:200]
+                    faculty_info += f"\n- {summary}"
+                if pdf_info.get('research_interests'):
+                    faculty_info += f"\n- Research: {pdf_info['research_interests']}"
+
         prompt = f"""You are an expert academic advisor. Explain why this faculty member is a good match for the given PhD proposal.
 
 PROPOSAL SUMMARY:
@@ -122,8 +136,7 @@ Methods: {', '.join(analysis.methods)}
 Application Areas: {', '.join(analysis.application_areas)}
 
 FACULTY INFORMATION:
-Name: {match.faculty_name or 'Faculty Member'}
-{match.text[:500]}
+{faculty_info}
 
 Provide a clear, concise explanation (2-3 sentences) of why this faculty member is recommended for supervising or collaborating on this proposal. Focus on specific overlaps in research interests, methods, or domains.
 
@@ -184,6 +197,7 @@ Explanation:"""
     def _create_supporting_evidence(self, match: FacultyMatch) -> str:
         """
         Create a summary of supporting evidence for the match.
+        Includes PDF support information if available.
 
         Args:
             match: Faculty match object.
@@ -191,12 +205,27 @@ Explanation:"""
         Returns:
             str: Supporting evidence summary.
         """
-        # Truncate text to reasonable length
-        evidence = match.text[:300]
-        if len(match.text) > 300:
-            evidence += "..."
+        evidence_parts = []
 
-        return evidence
+        # Add CSV faculty profile text (truncated)
+        csv_text = match.text[:300]
+        if len(match.text) > 300:
+            csv_text += "..."
+        evidence_parts.append(f"Profile: {csv_text}")
+
+        # Add PDF support information if available
+        if match.pdf_support:
+            evidence_parts.append(f"\nSupporting Documents ({len(match.pdf_support)} PDFs):")
+            for i, pdf_info in enumerate(match.pdf_support, 1):
+                if pdf_info.get('summary'):
+                    summary = pdf_info['summary']
+                    if len(summary) > 150:
+                        summary = summary[:150] + "..."
+                    evidence_parts.append(f"  PDF {i}: {summary}")
+                if pdf_info.get('research_interests'):
+                    evidence_parts.append(f"  Research: {pdf_info['research_interests']}")
+
+        return "\n".join(evidence_parts)
 
     def generate_email_draft(
         self,

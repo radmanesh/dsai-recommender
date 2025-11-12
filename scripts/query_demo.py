@@ -59,6 +59,45 @@ def display_retrieved_nodes(nodes):
         print()
 
 
+def display_faculty_matches(matches):
+    """Display FacultyMatch objects with PDF support information."""
+    print(f"\n📚 Retrieved {len(matches)} faculty match(es):")
+    print("-" * 80)
+
+    for i, match in enumerate(matches, 1):
+        print(f"\nFaculty {i}:")
+        print(f"  Name: {match.faculty_name or 'Unknown'}")
+        print(f"  Score: {match.score:.4f}")
+        print(f"  Source: {match.source_type}")
+
+        # Display basic info from CSV
+        if 'role' in match.metadata:
+            print(f"  Role: {match.metadata['role']}")
+        if 'department' in match.metadata:
+            print(f"  Department: {match.metadata['department']}")
+        if 'Areas' in match.metadata:
+            print(f"  Research Areas: {match.metadata['Areas']}")
+
+        # Display PDF support if available
+        if match.pdf_support:
+            print(f"\n  📄 Supporting PDF Documents ({len(match.pdf_support)}):")
+            for j, pdf_info in enumerate(match.pdf_support, 1):
+                print(f"\n    PDF {j}:")
+                if pdf_info.get('file_name'):
+                    print(f"      File: {pdf_info['file_name']}")
+                if pdf_info.get('type'):
+                    print(f"      Type: {pdf_info['type']}")
+                if pdf_info.get('summary'):
+                    summary = pdf_info['summary']
+                    if len(summary) > 150:
+                        summary = summary[:150] + "..."
+                    print(f"      Summary: {summary}")
+                if pdf_info.get('research_interests'):
+                    print(f"      Research Interests: {pdf_info['research_interests']}")
+
+        print()
+
+
 def run_example_queries():
     """Run a set of example queries."""
     print("Faculty Research Matchmaker - Query Demo")
