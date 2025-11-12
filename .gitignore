@@ -1,7 +1,7 @@
 # Environment variables
 .env
-
 # ChromaDB data
+notebooks/alfred_chroma_db/
 faculty_chroma_db/
 
 # Python

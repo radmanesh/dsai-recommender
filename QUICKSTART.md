@@ -98,6 +98,19 @@ This demonstrates:
 
 ## Try It Yourself
 
+### Command-Line Interface
+
+```bash
+# Quick match with text
+python scripts/match.py "multi-agent AI research"
+
+# Match a PDF proposal
+python scripts/match.py --file proposal.pdf
+
+# Quick search
+python scripts/match.py --query "machine learning"
+```
+
 ### Interactive Query Mode
 
 ```bash
@@ -132,7 +145,11 @@ for rec in result.recommendations:
 ### Single Query
 
 ```bash
+# Using query_demo
 python scripts/query_demo.py --query "natural language processing"
+
+# Or using match.py
+python scripts/match.py --query "natural language processing"
 ```
 
 ## Add Your Own Data

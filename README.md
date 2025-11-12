@@ -140,6 +140,15 @@ python scripts/query_demo.py
 
 ### Programmatic Usage
 
+```bash
+# Command-line interface
+python scripts/match.py "Your proposal text here..."
+python scripts/match.py --file proposal.pdf
+python scripts/match.py --query "machine learning"
+```
+
+Or use programmatically:
+
 ```python
 from src.agents.orchestrator import ResearchMatchOrchestrator
 
