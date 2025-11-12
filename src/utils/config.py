@@ -44,6 +44,12 @@ class Config:
     CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1024"))
     CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "128"))
 
+    # Ingestion Configuration
+    # ChromaDB has a max batch size limit (typically ~5461), so we use a safe batch size
+    INGESTION_BATCH_SIZE = int(os.getenv("INGESTION_BATCH_SIZE", "5000"))
+    # Whether to use LLM to extract metadata (summary, research interests, faculty name) from PDFs
+    EXTRACT_PDF_METADATA_WITH_LLM = os.getenv("EXTRACT_PDF_METADATA_WITH_LLM", "true").lower() == "true"
+
     @classmethod
     def validate(cls):
         """Validate that required configuration is present."""

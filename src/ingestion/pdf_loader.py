@@ -1,17 +1,109 @@
 """PDF loader for faculty documents (CVs, papers, proposals)."""
 
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict
 from llama_index.core import SimpleDirectoryReader, Document
 from src.utils.config import Config
+from src.models.llm import get_llm
 
 
-def load_pdfs_from_directory(pdf_dir: str = None) -> List[Document]:
+def _extract_metadata_with_llm(text: str, llm=None) -> Dict[str, Optional[str]]:
+    """
+    Extract summary, research interests, and faculty name from PDF text using LLM.
+
+    Args:
+        text: The PDF text content.
+        llm: LLM instance. If None, uses default from config.
+
+    Returns:
+        Dict with keys: summary, research_interests, faculty_name
+    """
+    if llm is None:
+        llm = get_llm()
+
+    # Truncate text if too long (keep first portion which usually has key info)
+    max_chars = 10000
+    if len(text) > max_chars:
+        text_sample = text[:max_chars] + "\n\n[... text truncated ...]"
+    else:
+        text_sample = text
+
+    prompt = f"""You are an expert academic document analyzer. Analyze the following document and extract key information.
+
+DOCUMENT TEXT:
+{text_sample}
+
+Please extract the following information:
+
+1. FACULTY_NAME: Extract the faculty member's full name (if mentioned). If not found, return "N/A"
+2. SUMMARY: Write a concise 2-3 sentence summary of the document's main content
+3. RESEARCH_INTERESTS: List the main research interests, areas, or topics mentioned (comma-separated). If not found, return "N/A"
+
+Format your response EXACTLY as follows:
+
+FACULTY_NAME: [name or N/A]
+SUMMARY: [your summary here]
+RESEARCH_INTERESTS: [interest1, interest2, interest3, ... or N/A]
+
+Be specific and use technical terminology where appropriate."""
+
+    try:
+        response = llm.complete(prompt)
+        response_text = str(response)
+
+        # Parse response
+        result = {
+            "faculty_name": None,
+            "summary": None,
+            "research_interests": None
+        }
+
+        lines = response_text.strip().split("\n")
+        current_field = None
+        summary_lines = []
+
+        for line in lines:
+            line = line.strip()
+
+            if line.startswith("FACULTY_NAME:"):
+                name = line.replace("FACULTY_NAME:", "").strip()
+                if name and name.upper() != "N/A":
+                    result["faculty_name"] = name
+            elif line.startswith("SUMMARY:"):
+                current_field = "SUMMARY"
+                summary_part = line.replace("SUMMARY:", "").strip()
+                if summary_part:
+                    summary_lines.append(summary_part)
+            elif line.startswith("RESEARCH_INTERESTS:"):
+                current_field = None
+                interests = line.replace("RESEARCH_INTERESTS:", "").strip()
+                if interests and interests.upper() != "N/A":
+                    # Remove brackets if present and split by comma
+                    interests = interests.strip("[]")
+                    result["research_interests"] = [item.strip() for item in interests.split(",") if item.strip()]
+            elif current_field == "SUMMARY" and line:
+                summary_lines.append(line)
+
+        result["summary"] = " ".join(summary_lines) if summary_lines else None
+
+        return result
+    except Exception as e:
+        print(f"  ⚠ Error extracting metadata with LLM: {e}")
+        return {
+            "faculty_name": None,
+            "summary": None,
+            "research_interests": None
+        }
+
+
+def load_pdfs_from_directory(pdf_dir: str = None, extract_metadata: bool = None) -> List[Document]:
     """
     Load all PDFs from a directory using LlamaIndex SimpleDirectoryReader.
 
     Args:
         pdf_dir: Path to the directory containing PDFs. Defaults to Config.PDF_DIR.
+        extract_metadata: If True, use LLM to extract summary, research interests, and faculty name.
+                         Defaults to Config.EXTRACT_PDF_METADATA_WITH_LLM.
 
     Returns:
         List[Document]: List of LlamaIndex Document objects.
@@ -37,32 +129,70 @@ def load_pdfs_from_directory(pdf_dir: str = None) -> List[Document]:
         documents = reader.load_data()
         print(f"Loaded {len(documents)} documents from PDFs")
 
-        # Enhance metadata for each document
+        # Use config default if extract_metadata not specified
+        if extract_metadata is None:
+            extract_metadata = Config.EXTRACT_PDF_METADATA_WITH_LLM
+
+        # Group documents by file (PDFs may be split into multiple pages)
+        documents_by_file = {}
         for doc in documents:
-            # Add source type
-            doc.metadata["source"] = "pdf"
-            doc.metadata["type"] = _infer_pdf_type(doc.metadata.get("file_name", ""))
+            file_name = doc.metadata.get("file_name", "unknown")
+            if file_name not in documents_by_file:
+                documents_by_file[file_name] = []
+            documents_by_file[file_name].append(doc)
 
-            # Try to extract faculty name from filename
-            faculty_name = _extract_faculty_name_from_filename(
-                doc.metadata.get("file_name", "")
-            )
-            if faculty_name:
-                doc.metadata["faculty_name"] = faculty_name
+        # Enhance metadata for each document group
+        llm = get_llm() if extract_metadata else None
+        enhanced_documents = []
 
-        return documents
+        for file_name, doc_group in documents_by_file.items():
+            # Combine all pages for this PDF
+            full_text = "\n\n".join([doc.text for doc in doc_group])
+
+            # Extract metadata from filename first
+            doc_type = _infer_pdf_type(file_name)
+            faculty_name_from_filename = _extract_faculty_name_from_filename(file_name)
+
+            # Extract metadata with LLM if enabled
+            llm_metadata = {}
+            if extract_metadata and full_text.strip():
+                print(f"  Extracting metadata from: {file_name}...")
+                llm_metadata = _extract_metadata_with_llm(full_text, llm)
+
+            # Apply metadata to all documents in this group
+            for doc in doc_group:
+                doc.metadata["source"] = "pdf"
+                doc.metadata["type"] = doc_type
+
+                # Faculty name: prefer LLM extraction, fallback to filename
+                if llm_metadata.get("faculty_name"):
+                    doc.metadata["faculty_name"] = llm_metadata["faculty_name"]
+                elif faculty_name_from_filename:
+                    doc.metadata["faculty_name"] = faculty_name_from_filename
+
+                # Add LLM-extracted metadata
+                if llm_metadata.get("summary"):
+                    doc.metadata["summary"] = llm_metadata["summary"]
+                if llm_metadata.get("research_interests"):
+                    doc.metadata["research_interests"] = ", ".join(llm_metadata["research_interests"])
+
+            enhanced_documents.extend(doc_group)
+
+        return enhanced_documents
 
     except Exception as e:
         print(f"Error loading PDFs: {e}")
         return []
 
 
-def load_single_pdf(pdf_path: str) -> List[Document]:
+def load_single_pdf(pdf_path: str, extract_metadata: bool = None) -> List[Document]:
     """
     Load a single PDF file.
 
     Args:
         pdf_path: Path to the PDF file.
+        extract_metadata: If True, use LLM to extract summary, research interests, and faculty name.
+                         Defaults to Config.EXTRACT_PDF_METADATA_WITH_LLM.
 
     Returns:
         List[Document]: List of Document objects (may be multiple pages).
@@ -80,14 +210,40 @@ def load_single_pdf(pdf_path: str) -> List[Document]:
         documents = reader.load_data()
         print(f"Loaded {len(documents)} documents from PDF")
 
+        # Combine all pages
+        full_text = "\n\n".join([doc.text for doc in documents])
+
+        # Extract metadata from filename
+        doc_type = _infer_pdf_type(path.name)
+        faculty_name_from_filename = _extract_faculty_name_from_filename(path.name)
+
+        # Use config default if extract_metadata not specified
+        if extract_metadata is None:
+            extract_metadata = Config.EXTRACT_PDF_METADATA_WITH_LLM
+
+        # Extract metadata with LLM if enabled
+        llm_metadata = {}
+        if extract_metadata and full_text.strip():
+            print(f"  Extracting metadata from: {path.name}...")
+            llm = get_llm()
+            llm_metadata = _extract_metadata_with_llm(full_text, llm)
+
         # Enhance metadata
         for doc in documents:
             doc.metadata["source"] = "pdf"
-            doc.metadata["type"] = _infer_pdf_type(path.name)
+            doc.metadata["type"] = doc_type
 
-            faculty_name = _extract_faculty_name_from_filename(path.name)
-            if faculty_name:
-                doc.metadata["faculty_name"] = faculty_name
+            # Faculty name: prefer LLM extraction, fallback to filename
+            if llm_metadata.get("faculty_name"):
+                doc.metadata["faculty_name"] = llm_metadata["faculty_name"]
+            elif faculty_name_from_filename:
+                doc.metadata["faculty_name"] = faculty_name_from_filename
+
+            # Add LLM-extracted metadata
+            if llm_metadata.get("summary"):
+                doc.metadata["summary"] = llm_metadata["summary"]
+            if llm_metadata.get("research_interests"):
+                doc.metadata["research_interests"] = ", ".join(llm_metadata["research_interests"])
 
         return documents
 
@@ -144,9 +300,12 @@ def _extract_faculty_name_from_filename(filename: str) -> Optional[str]:
             faculty_name = faculty_part.replace("_", " ").replace(".", " ").title()
             return faculty_name
 
-    # If no clear separator, return None
-    return None
+    # If no separator found, assume the entire filename is the faculty name
+    if name_part:  # Make sure it's not empty
+        faculty_name = name_part.replace("_", " ").replace(".", " ").title()
+        return faculty_name
 
+    return None
 
 def get_pdf_stats(pdf_dir: str = None) -> dict:
     """

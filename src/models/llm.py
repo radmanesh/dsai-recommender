@@ -34,7 +34,7 @@ def get_llm() -> HuggingFaceLLM:
 
         # Build model kwargs
         model_kwargs = {
-            "torch_dtype": dtype,
+            "dtype": dtype,
         }
 
         # Add quantization if enabled and on CUDA
@@ -86,7 +86,7 @@ def get_llm_with_params(temperature: float = None, max_tokens: int = None) -> Hu
 
     # Build model kwargs
     model_kwargs = {
-        "torch_dtype": dtype,
+        "dtype": dtype,
     }
 
     if Config.USE_8BIT_QUANTIZATION and device == "cuda":

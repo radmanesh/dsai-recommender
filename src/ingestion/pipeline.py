@@ -63,7 +63,7 @@ async def run_ingestion_pipeline(
     vector_store = get_vector_store(reset=reset_collection)
     print("✓ Components initialized")
 
-    # Step 3: Build ingestion pipeline
+    # Step 3: Build ingestion pipeline (without vector_store to handle batching manually)
     print("\n[Step 3] Building ingestion pipeline...")
     pipeline = IngestionPipeline(
         transformations=[
@@ -73,15 +73,56 @@ async def run_ingestion_pipeline(
             ),
             embed_model,
         ],
-        vector_store=vector_store,
+        # Don't attach vector_store here - we'll handle batching manually
     )
     print("✓ Pipeline built")
 
-    # Step 4: Run pipeline
-    print("\n[Step 4] Running pipeline (this may take a few minutes)...")
+    # Step 4: Run pipeline with batching to avoid ChromaDB batch size limits
+    print("\n[Step 4] Running pipeline with batching (this may take a few minutes)...")
+    print(f"   Batch size: {Config.INGESTION_BATCH_SIZE} nodes per batch")
+
+    all_nodes = []
+    batch_size = Config.INGESTION_BATCH_SIZE
+
     try:
+        # Process documents in batches to avoid memory issues
+        # First, run transformations (chunking + embedding) on all documents
+        print("   Processing documents through transformations...")
         nodes = await pipeline.arun(documents=documents)
-        print(f"✓ Successfully ingested {len(nodes)} nodes")
+        all_nodes = nodes
+        print(f"   ✓ Generated {len(nodes)} nodes from {len(documents)} documents")
+
+        # Now add nodes to vector store in batches
+        print(f"   Adding nodes to vector store in batches of {batch_size}...")
+        total_batches = (len(nodes) + batch_size - 1) // batch_size
+
+        i = 0
+        batch_num = 0
+        while i < len(nodes):
+            batch = nodes[i:i + batch_size]
+            batch_num += 1
+            print(f"   Processing batch {batch_num}/{total_batches} ({len(batch)} nodes)...")
+
+            try:
+                await vector_store.async_add(batch)
+                print(f"   ✓ Batch {batch_num} added successfully")
+                i += batch_size
+            except Exception as batch_error:
+                # If batch is too large, try with smaller batches
+                if "batch size" in str(batch_error).lower() or "max batch" in str(batch_error).lower():
+                    print(f"   ⚠ Batch too large, retrying with smaller batch size...")
+                    # Reduce batch size and retry this batch
+                    new_batch_size = min(batch_size // 2, len(batch))
+                    if new_batch_size < 1:
+                        raise batch_error
+                    batch_size = new_batch_size
+                    print(f"   Using reduced batch size: {batch_size}")
+                    # Don't increment i, so we retry the same batch with smaller size
+                    continue
+                else:
+                    raise
+
+        print(f"✓ Successfully ingested {len(nodes)} nodes in {total_batches} batch(es)")
     except Exception as e:
         print(f"✗ Error during ingestion: {e}")
         raise
@@ -91,12 +132,12 @@ async def run_ingestion_pipeline(
     print("Ingestion Complete!")
     print("=" * 60)
     print(f"Documents processed: {len(documents)}")
-    print(f"Nodes created: {len(nodes)}")
+    print(f"Nodes created: {len(all_nodes)}")
     print(f"Collection: {Config.COLLECTION_NAME}")
     print(f"Storage: {Config.CHROMA_PATH}")
     print("=" * 60)
 
-    return len(nodes)
+    return len(all_nodes)
 
 
 def run_ingestion_pipeline_sync(
