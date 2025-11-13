@@ -130,15 +130,30 @@ This will:
 
 ## Usage
 
-### Query Demo
+### Web Interface (Recommended)
 
-Test the system with example queries:
+Launch the user-friendly web interface:
 
 ```bash
-python scripts/query_demo.py
+# Method 1: Direct
+streamlit run app.py
+
+# Method 2: Via launcher script
+python scripts/run_app.py
 ```
 
-### Programmatic Usage
+Access at: **http://localhost:8501**
+
+**Features:**
+- 📄 **Drag-and-drop PDF upload** - Upload proposal PDFs easily
+- ✍️ **Text input** - Paste proposal text directly
+- 🔍 **Quick search** - Search by keywords or research areas
+- 📊 **Interactive results** - Expandable faculty cards with details
+- ✉️ **Email drafts** - Auto-generate contact emails
+
+### Command-Line Interface
+
+For scripting and automation:
 
 ```bash
 # Command-line interface
@@ -147,7 +162,17 @@ python scripts/match.py --file proposal.pdf
 python scripts/match.py --query "machine learning"
 ```
 
-Or use programmatically:
+### Query Demo
+
+Test the system with example queries:
+
+```bash
+python scripts/query_demo.py --interactive
+```
+
+### Programmatic Usage
+
+Use in your Python code:
 
 ```python
 from src.agents.orchestrator import ResearchMatchOrchestrator
@@ -201,13 +226,33 @@ Key configuration options in `.env`:
 - `CHUNK_SIZE`: Text chunk size for splitting
 - `CHUNK_OVERLAP`: Overlap between chunks
 
-## Development
+## Deployment
 
-### Running Tests
+### Local Development
 
 ```bash
-pytest tests/
+streamlit run app.py
 ```
+
+### Production (Wukong Server)
+
+```bash
+# Run in background with nohup
+nohup streamlit run app.py --server.port 8501 --server.headless true &
+
+# Or use screen/tmux
+screen -S matchmaker
+streamlit run app.py
+# Ctrl+A, D to detach
+```
+
+### Local Network Access
+
+```bash
+streamlit run app.py --server.address 0.0.0.0
+```
+
+## Development
 
 ### Adding New Data
 
