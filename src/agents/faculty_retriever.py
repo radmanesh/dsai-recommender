@@ -2,6 +2,7 @@
 
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
+from llama_index.core.vector_stores import MetadataFilters, ExactMatchFilter
 from src.indexing.index_builder import IndexManager
 from src.agents.proposal_analyzer import ProposalAnalysis
 from src.utils.config import Config
@@ -90,9 +91,12 @@ class FacultyRetriever:
             if faculty_id:
                 # Query PDFs collection with faculty_id filter
                 try:
+                    filters = MetadataFilters(
+                        filters=[ExactMatchFilter(key="faculty_id", value=faculty_id)]
+                    )
                     pdf_retriever = self.pdfs_manager.index.as_retriever(
                         similarity_top_k=5,
-                        filters={"faculty_id": faculty_id}
+                        filters=filters
                     )
                     pdf_nodes = pdf_retriever.retrieve(search_query)
 
@@ -143,9 +147,12 @@ class FacultyRetriever:
             if faculty_id:
                 # Query PDFs collection with faculty_id filter
                 try:
+                    filters = MetadataFilters(
+                        filters=[ExactMatchFilter(key="faculty_id", value=faculty_id)]
+                    )
                     pdf_retriever = self.pdfs_manager.index.as_retriever(
                         similarity_top_k=5,
-                        filters={"faculty_id": faculty_id}
+                        filters=filters
                     )
                     pdf_nodes = pdf_retriever.retrieve(query)
 
