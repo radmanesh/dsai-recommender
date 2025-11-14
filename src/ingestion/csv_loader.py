@@ -32,33 +32,31 @@ def load_faculty_csv(csv_path: str = None) -> List[Document]:
         # Create a rich text representation of the faculty member
         text_parts = []
 
-        # Basic info
-        if 'name' in row and pd.notna(row['name']):
-            text_parts.append(f"Faculty Name: {row['name']}")
+        # Basic info - using actual CSV column names
+        if 'Name' in row and pd.notna(row['Name']):
+            text_parts.append(f"Faculty Name: {row['Name']}")
 
-        if 'role' in row and pd.notna(row['role']):
-            text_parts.append(f"Role: {row['role']}")
-
-        if 'department' in row and pd.notna(row['department']):
-            text_parts.append(f"Department: {row['department']}")
+        if 'Role' in row and pd.notna(row['Role']):
+            text_parts.append(f"Role: {row['Role']}")
 
         # Research areas (most important for matching)
-        if 'areas' in row and pd.notna(row['areas']):
-            text_parts.append(f"Research Areas: {row['areas']}")
+        if 'Areas' in row and pd.notna(row['Areas']):
+            text_parts.append(f"Research Areas: {row['Areas']}")
 
-        if 'research_interests' in row and pd.notna(row['research_interests']):
-            text_parts.append(f"Research Interests: {row['research_interests']}")
+        # Note: CSV has typo "Research Intresests" instead of "Research Interests"
+        if 'Research Intresests' in row and pd.notna(row['Research Intresests']):
+            text_parts.append(f"Research Interests: {row['Research Intresests']}")
 
-        # Contact info
-        if 'email' in row and pd.notna(row['email']):
-            text_parts.append(f"Email: {row['email']}")
+        # Websites
+        if 'Website' in row and pd.notna(row['Website']):
+            text_parts.append(f"Website: {row['Website']}")
 
-        if 'website' in row and pd.notna(row['website']):
-            text_parts.append(f"Website: {row['website']}")
+        if 'Lab Website' in row and pd.notna(row['Lab Website']):
+            text_parts.append(f"Lab Website: {row['Lab Website']}")
 
         # Additional fields (if any)
         for col in df.columns:
-            if col not in ['name', 'role', 'department', 'areas', 'research_interests', 'email', 'website']:
+            if col not in ['Name', 'Role', 'Areas', 'Research Intresests', 'Website', 'Lab Website']:
                 if pd.notna(row[col]):
                     text_parts.append(f"{col}: {row[col]}")
 
@@ -67,15 +65,18 @@ def load_faculty_csv(csv_path: str = None) -> List[Document]:
 
         # Create metadata dictionary
         metadata = {
-            "source": "csv",
+            "source": str(path),
             "csv_row": int(idx),
-            "type": "faculty_profile",
+            "type": "csv",  # Changed to "csv" for filtering
+            "faculty_name": str(row.get('Name', 'Unknown'))  # Add for easier filtering
         }
 
-        # Add all available fields to metadata
+        # Add all available fields to metadata with normalized keys
         for col in df.columns:
             if pd.notna(row[col]):
-                metadata[col] = str(row[col])
+                # Normalize column names: lowercase and replace spaces with underscores
+                key = col.lower().replace(' ', '_')
+                metadata[key] = str(row[col])
 
         # Create Document
         doc = Document(
