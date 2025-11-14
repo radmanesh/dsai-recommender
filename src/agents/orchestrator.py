@@ -36,7 +36,6 @@ class ResearchMatchOrchestrator:
         self,
         top_k_retrieval: int = None,
         top_n_recommendations: int = 5,
-        collection_name: str = None,
     ):
         """
         Initialize the orchestrator.
@@ -44,15 +43,14 @@ class ResearchMatchOrchestrator:
         Args:
             top_k_retrieval: Number of faculty to retrieve. If None, uses config default.
             top_n_recommendations: Number of final recommendations to generate.
-            collection_name: ChromaDB collection name. If None, uses config default.
         """
         self.top_n_recommendations = top_n_recommendations
 
         # Initialize agents
         self.analyzer = ProposalAnalyzer()
         self.retriever = FacultyRetriever(
-            top_k=top_k_retrieval,
-            collection_name=collection_name
+            top_k=top_k_retrieval
+            # Uses default collections: faculty_profiles and faculty_pdfs
         )
         self.recommender = RecommendationAgent()
 

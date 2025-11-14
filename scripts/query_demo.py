@@ -106,7 +106,7 @@ def run_example_queries():
     # Check collection stats
     print("Checking collection status...")
     try:
-        stats = get_collection_stats()
+        stats = get_collection_stats(Config.FACULTY_PROFILES_COLLECTION)
         print(f"✓ Collection: {stats['name']}")
         print(f"✓ Items in collection: {stats['count']}")
 
@@ -122,9 +122,9 @@ def run_example_queries():
 
     print_separator()
 
-    # Initialize IndexManager
+    # Initialize IndexManager for faculty profiles
     print("Initializing index and query engine...")
-    manager = IndexManager()
+    manager = IndexManager(collection_name=Config.FACULTY_PROFILES_COLLECTION)
     print("✓ Ready to query")
 
     # Example queries
@@ -179,7 +179,7 @@ def interactive_mode():
 
     # Check collection
     try:
-        stats = get_collection_stats()
+        stats = get_collection_stats(Config.FACULTY_PROFILES_COLLECTION)
         print(f"Collection: {stats['name']} ({stats['count']} items)")
 
         if stats['count'] == 0:
@@ -191,9 +191,9 @@ def interactive_mode():
         print(f"❌ Error: {e}")
         return
 
-    # Initialize manager
+    # Initialize manager for faculty profiles
     print("\nInitializing query engine...")
-    manager = IndexManager()
+    manager = IndexManager(collection_name=Config.FACULTY_PROFILES_COLLECTION)
     print("✓ Ready")
 
     print("\nEnter your queries (type 'quit' or 'exit' to stop)")
@@ -270,12 +270,12 @@ def main():
         print("Faculty Research Matchmaker - Single Query")
         print_separator()
 
-        stats = get_collection_stats()
+        stats = get_collection_stats(Config.FACULTY_PROFILES_COLLECTION)
         if stats['count'] == 0:
             print("⚠️  Collection is empty! Run ingestion first.")
             return
 
-        manager = IndexManager()
+        manager = IndexManager(collection_name=Config.FACULTY_PROFILES_COLLECTION)
         print(f"Query: {args.query}\n")
 
         response = manager.query(args.query)

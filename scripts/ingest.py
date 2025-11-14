@@ -59,12 +59,18 @@ def main():
         print("Ingestion cancelled.")
         return
 
-    # Check if we should reset the collection
+    # Check if we should reset the collections
     try:
-        stats = get_collection_stats()
-        if stats['count'] > 0:
-            print(f"\n⚠️  Collection '{stats['name']}' already has {stats['count']} items")
-            reset = input("Reset collection and start fresh? [y/N]: ").strip().lower()
+        profiles_stats = get_collection_stats(Config.FACULTY_PROFILES_COLLECTION)
+        pdfs_stats = get_collection_stats(Config.FACULTY_PDFS_COLLECTION)
+
+        total_items = profiles_stats['count'] + pdfs_stats['count']
+
+        if total_items > 0:
+            print(f"\n⚠️  Existing data found:")
+            print(f"  - {Config.FACULTY_PROFILES_COLLECTION}: {profiles_stats['count']} items")
+            print(f"  - {Config.FACULTY_PDFS_COLLECTION}: {pdfs_stats['count']} items")
+            reset = input("Reset collections and start fresh? [y/N]: ").strip().lower()
             reset_collection = (reset == 'y')
         else:
             reset_collection = False
@@ -78,11 +84,17 @@ def main():
         print("\n✅ Ingestion completed successfully!")
         print(f"Created {num_nodes} nodes in the vector store")
 
-        # Show final stats
+        # Show final stats for both collections
         print("\nFinal collection stats:")
-        stats = get_collection_stats()
-        print(f"  Collection: {stats['name']}")
-        print(f"  Total items: {stats['count']}")
+        try:
+            profiles_stats = get_collection_stats(Config.FACULTY_PROFILES_COLLECTION)
+            pdfs_stats = get_collection_stats(Config.FACULTY_PDFS_COLLECTION)
+
+            print(f"  📋 {Config.FACULTY_PROFILES_COLLECTION}: {profiles_stats['count']} items")
+            print(f"  📄 {Config.FACULTY_PDFS_COLLECTION}: {pdfs_stats['count']} items")
+            print(f"  📊 Total: {profiles_stats['count'] + pdfs_stats['count']} items")
+        except Exception as e:
+            print(f"  ⚠️  Could not retrieve final stats: {e}")
 
     except Exception as e:
         print(f"\n❌ Error during ingestion: {e}")

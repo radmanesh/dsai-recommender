@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import nest_asyncio
 from src.agents.orchestrator import ResearchMatchOrchestrator
 from src.indexing.vector_store import get_collection_stats
+from src.utils.config import Config
 
 nest_asyncio.apply()
 
@@ -78,11 +79,11 @@ Examples:
 
     args = parser.parse_args()
 
-    # Check collection
+    # Check faculty profiles collection
     try:
-        stats = get_collection_stats()
+        stats = get_collection_stats(Config.FACULTY_PROFILES_COLLECTION)
         if stats['count'] == 0:
-            print("❌ Error: Collection is empty!")
+            print("❌ Error: Faculty profiles collection is empty!")
             print("Please run 'python scripts/ingest.py' first to index data.")
             sys.exit(1)
     except Exception as e:
