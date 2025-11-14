@@ -33,6 +33,11 @@ An orchestrator coordinates the workflow: upload → analysis → retrieval → 
 
 ```
 dsai-recommender/
+├── app.py                           # Streamlit web interface
+├── .env.template                    # Environment configuration template
+├── requirements.txt                 # Python dependencies
+├── README.md                        # This file
+├── QUICKSTART.md                    # Quick start guide
 ├── data/
 │   ├── DSAI-Faculties.csv          # Faculty metadata
 │   └── pdfs/                        # Faculty CVs, papers, proposals
@@ -41,11 +46,17 @@ dsai-recommender/
 │   ├── indexing/                    # Vector store and index management
 │   ├── agents/                      # Multi-agent implementation
 │   ├── models/                      # LLM and embedding setup
+│   ├── web/                         # Web UI components
 │   └── utils/                       # Configuration and utilities
 ├── scripts/
 │   ├── ingest.py                    # Data ingestion script
-│   └── query_demo.py                # Query demonstration
-└── requirements.txt                 # Python dependencies
+│   ├── match.py                     # CLI matching interface
+│   ├── query_demo.py                # Interactive query demo
+│   ├── select_model.py              # Hardware checker & model selector
+│   ├── test_local_model.py          # Model verification
+│   └── run_app.py                   # Streamlit app launcher
+└── notebooks/
+    └── recommender.ipynb            # Development notebook
 ```
 
 ## Hardware Requirements
@@ -67,6 +78,17 @@ dsai-recommender/
 ```bash
 git clone <repository-url>
 cd dsai-recommender
+
+# Create mamba environment
+mamba create -n recommender python=3.10
+mamba activate recommender
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+**Note:** If using virtualenv instead:
+```bash
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
@@ -306,5 +328,6 @@ python scripts/ingest.py
 ## Acknowledgments
 
 - Built with LlamaIndex, ChromaDB, and LangChain
-- Powered by Qwen2.5-Coder-32B-Instruct and BGE embeddings
+- Powered by Qwen2.5-Coder-1.5B-Instruct (local) and BGE embeddings
+- Web interface built with Streamlit
 

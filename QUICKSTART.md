@@ -4,7 +4,8 @@ Get up and running with the Agentic Research Matchmaker in 10 minutes.
 
 ## Prerequisites
 
-- Python 3.8 or higher
+- Python 3.10 or higher
+- Mamba or Conda (recommended) or virtualenv
 - HuggingFace account and API token
 - **5GB+ free disk space** (for local model)
 - **8GB+ RAM** (16GB recommended)
@@ -16,6 +17,17 @@ Get up and running with the Agentic Research Matchmaker in 10 minutes.
 
 ```bash
 cd dsai-recommender
+
+# Create and activate mamba environment
+mamba create -n recommender python=3.10
+mamba activate recommender
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+**Alternative (using virtualenv):**
+```bash
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
@@ -85,20 +97,48 @@ Expected output:
 Created XX nodes in the vector store
 ```
 
-### Step 3: Run Demo
+### Step 7: Launch Web Interface
 
 ```bash
-python scripts/demo.py
+# Direct launch
+streamlit run app.py
+
+# Or use the launcher script
+python scripts/run_app.py
 ```
 
-This demonstrates:
-- Text-based proposal matching
-- Quick search functionality
-- PDF proposal matching (if available)
+Access at: **http://localhost:8501**
+
+The web interface provides:
+- 📄 Drag-and-drop PDF upload
+- ✍️ Text input for proposals
+- 🔍 Quick keyword search
+- 📊 Interactive results with details
+- ✉️ Email draft generation
 
 ## Try It Yourself
 
+### Web Interface (Recommended)
+
+**Option 1: Upload PDF**
+1. Open http://localhost:8501
+2. Go to "📄 Upload PDF" tab
+3. Drag and drop your proposal PDF
+4. Click "🚀 Analyze Proposal"
+
+**Option 2: Text Input**
+1. Go to "✍️ Text Input" tab
+2. Paste your proposal text
+3. Click "🚀 Analyze Text"
+
+**Option 3: Quick Search**
+1. Go to "🔍 Quick Search" tab
+2. Enter keywords like "machine learning"
+3. Click "🔍 Search"
+
 ### Command-Line Interface
+
+For scripting and automation:
 
 ```bash
 # Quick match with text
@@ -111,7 +151,7 @@ python scripts/match.py --file proposal.pdf
 python scripts/match.py --query "machine learning"
 ```
 
-### Interactive Query Mode
+### Interactive Query Demo
 
 ```bash
 python scripts/query_demo.py --interactive
@@ -142,14 +182,17 @@ for rec in result.recommendations:
     print(f"   {rec.explanation}\n")
 ```
 
-### Single Query
+### Single Query Examples
 
 ```bash
 # Using query_demo
 python scripts/query_demo.py --query "natural language processing"
 
-# Or using match.py
+# Or using match.py for scripting
 python scripts/match.py --query "natural language processing"
+
+# Or use the web interface for best experience
+streamlit run app.py
 ```
 
 ## Add Your Own Data
@@ -217,23 +260,29 @@ Choose "Reset collection" if you want to start fresh.
 
 ### Import errors
 
-**Solution**: Ensure you activated the virtual environment:
+**Solution**: Ensure you activated the mamba environment:
+```bash
+mamba activate recommender
+```
+
+Or if using virtualenv:
 ```bash
 source venv/bin/activate
 ```
 
 ## Next Steps
 
-1. **Add your real data**: Replace sample CSV and add real PDFs
-2. **Customize configuration**: Edit `.env` to tune parameters
-3. **Build UI**: Integrate with Streamlit or Flask for web interface
-4. **Deploy agents**: Use Google Agent Development Kit for production
+1. **Use the web interface**: Launch with `streamlit run app.py` for easy interaction
+2. **Add your real data**: Replace sample CSV and add real faculty PDFs
+3. **Customize configuration**: Edit `.env` to tune LLM parameters
+4. **Deploy to production**: See README.md for Wukong server deployment instructions
 
 ## Getting Help
 
 - Check `README.md` for detailed documentation
-- Run `python scripts/test_system.py` to diagnose issues
-- Review logs in the terminal output
+- Run `python scripts/test_local_model.py` to verify model loading
+- Use `python scripts/select_model.py` to check hardware compatibility
+- Review logs in the terminal output or Streamlit console
 
 ## Architecture Overview
 
