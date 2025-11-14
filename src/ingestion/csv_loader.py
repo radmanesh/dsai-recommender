@@ -67,8 +67,9 @@ def load_faculty_csv(csv_path: str = None) -> List[Document]:
         metadata = {
             "source": str(path),
             "csv_row": int(idx),
-            "type": "csv",  # Changed to "csv" for filtering
-            "faculty_name": str(row.get('Name', 'Unknown'))  # Add for easier filtering
+            "type": "faculty_profile",  # Changed to "faculty_profile" for dual-store architecture
+            "faculty_name": str(row.get('Name', 'Unknown')),  # Add for easier filtering
+            "faculty_id": str(row.get('faculty_id', ''))  # Add faculty_id for linking
         }
 
         # Add all available fields to metadata with normalized keys

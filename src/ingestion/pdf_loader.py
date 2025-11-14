@@ -5,6 +5,7 @@ from typing import List, Optional, Dict
 from llama_index.core import SimpleDirectoryReader, Document
 from src.utils.config import Config
 from src.models.llm import get_llm
+from src.utils.faculty_id import load_faculty_id_mapping, map_name_to_faculty_id
 
 
 def _extract_metadata_with_llm(text: str, llm=None) -> Dict[str, Optional[str]]:
@@ -141,6 +142,9 @@ def load_pdfs_from_directory(pdf_dir: str = None, extract_metadata: bool = None)
                 documents_by_file[file_name] = []
             documents_by_file[file_name].append(doc)
 
+        # Load faculty_id mapping from CSV
+        faculty_name_to_id = load_faculty_id_mapping()
+
         # Enhance metadata for each document group
         llm = get_llm() if extract_metadata else None
         enhanced_documents = []
@@ -159,22 +163,39 @@ def load_pdfs_from_directory(pdf_dir: str = None, extract_metadata: bool = None)
                 print(f"  Extracting metadata from: {file_name}...")
                 llm_metadata = _extract_metadata_with_llm(full_text, llm)
 
+            # Determine faculty_name for this PDF
+            faculty_name = None
+            if llm_metadata.get("faculty_name"):
+                faculty_name = llm_metadata["faculty_name"]
+            elif faculty_name_from_filename:
+                faculty_name = faculty_name_from_filename
+
+            # Map faculty_name to faculty_id
+            faculty_id = None
+            if faculty_name:
+                faculty_id = map_name_to_faculty_id(faculty_name, faculty_name_to_id)
+
             # Apply metadata to all documents in this group
             for doc in doc_group:
                 doc.metadata["source"] = "pdf"
-                doc.metadata["type"] = doc_type
+                doc.metadata["type"] = "faculty_pdf"  # Changed to "faculty_pdf" for dual-store architecture
 
-                # Faculty name: prefer LLM extraction, fallback to filename
-                if llm_metadata.get("faculty_name"):
-                    doc.metadata["faculty_name"] = llm_metadata["faculty_name"]
-                elif faculty_name_from_filename:
-                    doc.metadata["faculty_name"] = faculty_name_from_filename
+                # Faculty name
+                if faculty_name:
+                    doc.metadata["faculty_name"] = faculty_name
+
+                # Faculty ID (for linking to CSV profiles)
+                if faculty_id:
+                    doc.metadata["faculty_id"] = faculty_id
 
                 # Add LLM-extracted metadata
                 if llm_metadata.get("summary"):
                     doc.metadata["summary"] = llm_metadata["summary"]
                 if llm_metadata.get("research_interests"):
                     doc.metadata["research_interests"] = ", ".join(llm_metadata["research_interests"])
+
+                # Add document type (cv, paper, etc.)
+                doc.metadata["pdf_type"] = doc_type
 
             enhanced_documents.extend(doc_group)
 
@@ -228,22 +249,40 @@ def load_single_pdf(pdf_path: str, extract_metadata: bool = None) -> List[Docume
             llm = get_llm()
             llm_metadata = _extract_metadata_with_llm(full_text, llm)
 
+        # Determine faculty_name for this PDF
+        faculty_name = None
+        if llm_metadata.get("faculty_name"):
+            faculty_name = llm_metadata["faculty_name"]
+        elif faculty_name_from_filename:
+            faculty_name = faculty_name_from_filename
+
+        # Load faculty_id mapping and map faculty_name to faculty_id
+        faculty_name_to_id = load_faculty_id_mapping()
+        faculty_id = None
+        if faculty_name:
+            faculty_id = map_name_to_faculty_id(faculty_name, faculty_name_to_id)
+
         # Enhance metadata
         for doc in documents:
             doc.metadata["source"] = "pdf"
-            doc.metadata["type"] = doc_type
+            doc.metadata["type"] = "faculty_pdf"  # Changed to "faculty_pdf" for dual-store architecture
 
-            # Faculty name: prefer LLM extraction, fallback to filename
-            if llm_metadata.get("faculty_name"):
-                doc.metadata["faculty_name"] = llm_metadata["faculty_name"]
-            elif faculty_name_from_filename:
-                doc.metadata["faculty_name"] = faculty_name_from_filename
+            # Faculty name
+            if faculty_name:
+                doc.metadata["faculty_name"] = faculty_name
+
+            # Faculty ID (for linking to CSV profiles)
+            if faculty_id:
+                doc.metadata["faculty_id"] = faculty_id
 
             # Add LLM-extracted metadata
             if llm_metadata.get("summary"):
                 doc.metadata["summary"] = llm_metadata["summary"]
             if llm_metadata.get("research_interests"):
                 doc.metadata["research_interests"] = ", ".join(llm_metadata["research_interests"])
+
+            # Add document type (cv, paper, etc.)
+            doc.metadata["pdf_type"] = doc_type
 
         return documents
 

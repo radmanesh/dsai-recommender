@@ -32,29 +32,40 @@ class FacultyMatch:
 
 
 class FacultyRetriever:
-    """Agent for retrieving relevant faculty based on proposal analysis."""
+    """Agent for retrieving relevant faculty based on proposal analysis using dual-store architecture."""
 
-    def __init__(self, top_k: int = None, collection_name: str = None):
+    def __init__(
+        self,
+        top_k: int = None,
+        profiles_collection: str = None,
+        pdfs_collection: str = None
+    ):
         """
-        Initialize FacultyRetriever.
+        Initialize FacultyRetriever with dual-store support.
 
         Args:
             top_k: Number of results to retrieve. Defaults to Config.TOP_K_RESULTS.
-            collection_name: ChromaDB collection name. Defaults to Config.COLLECTION_NAME.
+            profiles_collection: Collection for faculty profiles. Defaults to Config.FACULTY_PROFILES_COLLECTION.
+            pdfs_collection: Collection for PDF documents. Defaults to Config.FACULTY_PDFS_COLLECTION.
         """
         self.top_k = top_k or Config.TOP_K_RESULTS
-        self.index_manager = IndexManager(collection_name=collection_name)
+        self.profiles_collection = profiles_collection or Config.FACULTY_PROFILES_COLLECTION
+        self.pdfs_collection = pdfs_collection or Config.FACULTY_PDFS_COLLECTION
+
+        # Create separate index managers for profiles and PDFs
+        self.profiles_manager = IndexManager(collection_name=self.profiles_collection)
+        self.pdfs_manager = IndexManager(collection_name=self.pdfs_collection)
 
     def retrieve_from_analysis(self, analysis: ProposalAnalysis) -> List[FacultyMatch]:
         """
-        Retrieve faculty based on proposal analysis.
-        Returns only CSV faculty entries with linked PDF support information.
+        Retrieve faculty based on proposal analysis using dual-store architecture.
+        Ranks using faculty_profiles collection, then enriches with PDF evidence.
 
         Args:
             analysis: ProposalAnalysis object.
 
         Returns:
-            List[FacultyMatch]: List of matched CSV faculty with PDF support.
+            List[FacultyMatch]: List of matched faculty profiles with PDF support.
         """
         print(f"Retrieving top {self.top_k} faculty matches...")
 
@@ -62,94 +73,96 @@ class FacultyRetriever:
         search_query = analysis.to_search_query()
         print(f"Search query: {search_query}")
 
-        # Retrieve a larger set of nodes to capture both CSV and PDF nodes
-        retrieval_size = self.top_k * 3
-        nodes = self.index_manager.retriever.retrieve(search_query)
+        # Retrieve from faculty_profiles collection (this is our main ranking)
+        profile_nodes = self.profiles_manager.retriever.retrieve(search_query)
+        print(f"  Found {len(profile_nodes)} profile nodes")
 
-        # Separate CSV and PDF nodes
-        csv_nodes, pdf_nodes = self._separate_nodes_by_source(nodes[:retrieval_size])
-        print(f"  Found {len(csv_nodes)} CSV nodes and {len(pdf_nodes)} PDF nodes")
-
-        # Map PDFs to CSV faculty names
-        faculty_pdf_map = self._map_pdfs_to_csv(csv_nodes, pdf_nodes)
-
-        # Convert CSV nodes to FacultyMatch objects with PDF support
+        # Convert profile nodes to FacultyMatch objects
         matches = []
-        for node in csv_nodes:
+        for node in profile_nodes[:self.top_k]:
             match = self._node_to_faculty_match(node)
-
-            # Attach PDF support if available
-            csv_faculty_name = node.metadata.get('name')
-            if csv_faculty_name and csv_faculty_name in faculty_pdf_map:
-                pdf_support_list = []
-                for pdf_node in faculty_pdf_map[csv_faculty_name]:
-                    pdf_support_list.append(self._extract_pdf_support(pdf_node))
-                match.pdf_support = pdf_support_list
-
             matches.append(match)
 
-        # Group by faculty name and limit to top_k
-        grouped_matches = self._group_by_faculty(matches)
-        grouped_matches = grouped_matches[:self.top_k]
+        # Now query PDF store for each faculty to get supporting evidence
+        print(f"  Querying PDF store for supporting evidence...")
+        for match in matches:
+            faculty_id = match.metadata.get('faculty_id')
+            if faculty_id:
+                # Query PDFs collection with faculty_id filter
+                try:
+                    pdf_retriever = self.pdfs_manager.index.as_retriever(
+                        similarity_top_k=5,
+                        filters={"faculty_id": faculty_id}
+                    )
+                    pdf_nodes = pdf_retriever.retrieve(search_query)
 
-        print(f"✓ Retrieved {len(grouped_matches)} unique CSV faculty matches")
-        if any(m.pdf_support for m in grouped_matches):
-            pdf_count = sum(1 for m in grouped_matches if m.pdf_support)
+                    if pdf_nodes:
+                        pdf_support_list = []
+                        for pdf_node in pdf_nodes:
+                            pdf_support_list.append(self._extract_pdf_support(pdf_node))
+                        match.pdf_support = pdf_support_list
+                except Exception as e:
+                    print(f"    ⚠ Error retrieving PDFs for {faculty_id}: {e}")
+
+        print(f"✓ Retrieved {len(matches)} faculty matches with PDF evidence")
+        if any(m.pdf_support for m in matches):
+            pdf_count = sum(1 for m in matches if m.pdf_support)
             print(f"  {pdf_count} faculty have supporting PDF documents")
 
-        return grouped_matches
+        return matches
 
     def retrieve_from_query(self, query: str, top_k: int = None) -> List[FacultyMatch]:
         """
-        Retrieve faculty based on a text query.
-        Returns only CSV faculty entries with linked PDF support information.
+        Retrieve faculty based on a text query using dual-store architecture.
+        Ranks using faculty_profiles collection, then enriches with PDF evidence.
 
         Args:
             query: Search query string.
             top_k: Number of results. If None, uses self.top_k.
 
         Returns:
-            List[FacultyMatch]: List of matched CSV faculty with PDF support.
+            List[FacultyMatch]: List of matched faculty profiles with PDF support.
         """
         k = top_k or self.top_k
         print(f"Retrieving top {k} faculty matches for query...")
 
-        # Retrieve a larger set of nodes to capture both CSV and PDF nodes
-        retrieval_size = k * 3
-        nodes = self.index_manager.retriever.retrieve(query)
+        # Retrieve from faculty_profiles collection (this is our main ranking)
+        profile_nodes = self.profiles_manager.retriever.retrieve(query)
+        print(f"  Found {len(profile_nodes)} profile nodes")
 
-        # Separate CSV and PDF nodes
-        csv_nodes, pdf_nodes = self._separate_nodes_by_source(nodes[:retrieval_size])
-        print(f"  Found {len(csv_nodes)} CSV nodes and {len(pdf_nodes)} PDF nodes")
-
-        # Map PDFs to CSV faculty names
-        faculty_pdf_map = self._map_pdfs_to_csv(csv_nodes, pdf_nodes)
-
-        # Convert CSV nodes to FacultyMatch objects with PDF support
+        # Convert profile nodes to FacultyMatch objects
         matches = []
-        for node in csv_nodes:
+        for node in profile_nodes[:k]:
             match = self._node_to_faculty_match(node)
-
-            # Attach PDF support if available
-            csv_faculty_name = node.metadata.get('name')
-            if csv_faculty_name and csv_faculty_name in faculty_pdf_map:
-                pdf_support_list = []
-                for pdf_node in faculty_pdf_map[csv_faculty_name]:
-                    pdf_support_list.append(self._extract_pdf_support(pdf_node))
-                match.pdf_support = pdf_support_list
-
             matches.append(match)
 
-        # Group by faculty name and limit to top_k
-        grouped_matches = self._group_by_faculty(matches)
-        grouped_matches = grouped_matches[:k]
+        # Now query PDF store for each faculty to get supporting evidence
+        print(f"  Querying PDF store for supporting evidence...")
+        for match in matches:
+            faculty_id = match.metadata.get('faculty_id')
+            if faculty_id:
+                # Query PDFs collection with faculty_id filter
+                try:
+                    pdf_retriever = self.pdfs_manager.index.as_retriever(
+                        similarity_top_k=5,
+                        filters={"faculty_id": faculty_id}
+                    )
+                    pdf_nodes = pdf_retriever.retrieve(query)
 
-        print(f"✓ Retrieved {len(grouped_matches)} unique CSV faculty matches")
-        if any(m.pdf_support for m in grouped_matches):
-            pdf_count = sum(1 for m in grouped_matches if m.pdf_support)
+                    if pdf_nodes:
+                        pdf_support_list = []
+                        for pdf_node in pdf_nodes:
+                            pdf_support_list.append(self._extract_pdf_support(pdf_node))
+                        match.pdf_support = pdf_support_list
+                except Exception as e:
+                    print(f"    ⚠ Error retrieving PDFs for {faculty_id}: {e}")
+
+        print(f"✓ Retrieved {len(matches)} faculty matches with PDF evidence")
+        if any(m.pdf_support for m in matches):
+            pdf_count = sum(1 for m in matches if m.pdf_support)
             print(f"  {pdf_count} faculty have supporting PDF documents")
 
-        return grouped_matches
+        return matches
 
     def _node_to_faculty_match(self, node) -> FacultyMatch:
         """

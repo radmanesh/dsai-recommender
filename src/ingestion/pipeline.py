@@ -1,70 +1,41 @@
 """Main ingestion pipeline for combining CSV and PDF data."""
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from llama_index.core import Document
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.ingestion import IngestionPipeline
 from src.utils.config import Config
 from src.models.embeddings import get_embedding_model
-from src.indexing.vector_store import get_vector_store
+from src.models.llm import get_llm
+from src.indexing.vector_store import get_vector_store, get_or_create_collection
 from src.ingestion.csv_loader import load_faculty_csv
 from src.ingestion.pdf_loader import load_pdfs_from_directory
+from src.ingestion.enrichment import enrich_csv_documents, get_pdf_nodes_by_faculty
 
 
-async def run_ingestion_pipeline(
-    csv_path: Optional[str] = None,
-    pdf_dir: Optional[str] = None,
-    reset_collection: bool = False,
-) -> int:
+async def _ingest_documents_to_collection(
+    documents: List[Document],
+    collection_name: str,
+    reset: bool = False
+) -> Tuple[int, List]:
     """
-    Run the complete ingestion pipeline: load CSV + PDFs, chunk, embed, and store.
+    Helper function to ingest documents into a specific collection.
 
     Args:
-        csv_path: Path to faculty CSV file. Defaults to Config.CSV_PATH.
-        pdf_dir: Path to PDF directory. Defaults to Config.PDF_DIR.
-        reset_collection: If True, delete existing collection and start fresh.
+        documents: List of documents to ingest.
+        collection_name: Name of the collection.
+        reset: Whether to reset the collection.
 
     Returns:
-        int: Number of nodes ingested.
+        Tuple of (number of nodes ingested, list of nodes)
     """
-    print("=" * 60)
-    print("Starting Ingestion Pipeline")
-    print("=" * 60)
+    print(f"\n[Ingestion] Processing {len(documents)} documents for '{collection_name}'...")
 
-    # Step 1: Load all documents
-    print("\n[Step 1] Loading documents...")
-    documents = []
-
-    # Load CSV
-    try:
-        csv_docs = load_faculty_csv(csv_path)
-        documents.extend(csv_docs)
-        print(f"✓ Loaded {len(csv_docs)} documents from CSV")
-    except Exception as e:
-        print(f"✗ Error loading CSV: {e}")
-
-    # Load PDFs
-    try:
-        pdf_docs = load_pdfs_from_directory(pdf_dir)
-        documents.extend(pdf_docs)
-        print(f"✓ Loaded {len(pdf_docs)} documents from PDFs")
-    except Exception as e:
-        print(f"✗ Error loading PDFs: {e}")
-
-    if not documents:
-        print("\n⚠ No documents loaded. Please check your data directory.")
-        return 0
-
-    print(f"\n📚 Total documents loaded: {len(documents)}")
-
-    # Step 2: Initialize components
-    print("\n[Step 2] Initializing components...")
+    # Initialize components
     embed_model = get_embedding_model()
-    vector_store = get_vector_store(reset=reset_collection)
-    print("✓ Components initialized")
+    vector_store = get_vector_store(collection_name=collection_name, reset=reset)
 
-    # Step 3: Build ingestion pipeline (without vector_store to handle batching manually)
-    print("\n[Step 3] Building ingestion pipeline...")
+    # Build ingestion pipeline
     pipeline = IngestionPipeline(
         transformations=[
             SentenceSplitter(
@@ -73,77 +44,171 @@ async def run_ingestion_pipeline(
             ),
             embed_model,
         ],
-        # Don't attach vector_store here - we'll handle batching manually
     )
-    print("✓ Pipeline built")
 
-    # Step 4: Run pipeline with batching to avoid ChromaDB batch size limits
-    print("\n[Step 4] Running pipeline with batching (this may take a few minutes)...")
-    print(f"   Batch size: {Config.INGESTION_BATCH_SIZE} nodes per batch")
+    # Process documents through transformations
+    print(f"   Chunking and embedding documents...")
+    nodes = await pipeline.arun(documents=documents)
+    print(f"   ✓ Generated {len(nodes)} nodes from {len(documents)} documents")
 
-    all_nodes = []
+    # Add nodes to vector store in batches
     batch_size = Config.INGESTION_BATCH_SIZE
+    print(f"   Adding nodes to vector store in batches of {batch_size}...")
+    total_batches = (len(nodes) + batch_size - 1) // batch_size
+
+    i = 0
+    batch_num = 0
+    while i < len(nodes):
+        batch = nodes[i:i + batch_size]
+        batch_num += 1
+        print(f"   Batch {batch_num}/{total_batches} ({len(batch)} nodes)...", end=" ")
+
+        try:
+            await vector_store.async_add(batch)
+            print("✓")
+            i += batch_size
+        except Exception as batch_error:
+            # If batch is too large, try with smaller batches
+            if "batch size" in str(batch_error).lower() or "max batch" in str(batch_error).lower():
+                print(f"⚠ Batch too large, retrying with smaller size...")
+                new_batch_size = min(batch_size // 2, len(batch))
+                if new_batch_size < 1:
+                    raise batch_error
+                batch_size = new_batch_size
+                print(f"   Using reduced batch size: {batch_size}")
+                continue
+            else:
+                raise
+
+    print(f"✓ Successfully ingested {len(nodes)} nodes into '{collection_name}'")
+
+    return len(nodes), nodes
+
+
+async def run_ingestion_pipeline(
+    csv_path: Optional[str] = None,
+    pdf_dir: Optional[str] = None,
+    reset_collection: bool = False,
+    enable_enrichment: bool = True,
+) -> int:
+    """
+    Run the complete dual-store ingestion pipeline with enrichment.
+
+    This pipeline:
+    1. Loads CSV and PDF documents separately
+    2. Ingests PDFs into faculty_pdfs collection
+    3. Ingests CSV docs into faculty_profiles collection
+    4. (Optional) Enriches CSV docs with PDF information and re-ingests
+
+    Args:
+        csv_path: Path to faculty CSV file. Defaults to Config.CSV_PATH.
+        pdf_dir: Path to PDF directory. Defaults to Config.PDF_DIR.
+        reset_collection: If True, delete existing collections and start fresh.
+        enable_enrichment: If True, enrich faculty profiles with PDF data.
+
+    Returns:
+        int: Total number of nodes ingested across both collections.
+    """
+    print("=" * 80)
+    print("Starting Dual-Store Ingestion Pipeline with Enrichment")
+    print("=" * 80)
+
+    # Step 1: Load documents
+    print("\n[Step 1] Loading documents...")
+
+    csv_docs = []
+    pdf_docs = []
 
     try:
-        # Process documents in batches to avoid memory issues
-        # First, run transformations (chunking + embedding) on all documents
-        print("   Processing documents through transformations...")
-        nodes = await pipeline.arun(documents=documents)
-        all_nodes = nodes
-        print(f"   ✓ Generated {len(nodes)} nodes from {len(documents)} documents")
-
-        # Now add nodes to vector store in batches
-        print(f"   Adding nodes to vector store in batches of {batch_size}...")
-        total_batches = (len(nodes) + batch_size - 1) // batch_size
-
-        i = 0
-        batch_num = 0
-        while i < len(nodes):
-            batch = nodes[i:i + batch_size]
-            batch_num += 1
-            print(f"   Processing batch {batch_num}/{total_batches} ({len(batch)} nodes)...")
-
-            try:
-                await vector_store.async_add(batch)
-                print(f"   ✓ Batch {batch_num} added successfully")
-                i += batch_size
-            except Exception as batch_error:
-                # If batch is too large, try with smaller batches
-                if "batch size" in str(batch_error).lower() or "max batch" in str(batch_error).lower():
-                    print(f"   ⚠ Batch too large, retrying with smaller batch size...")
-                    # Reduce batch size and retry this batch
-                    new_batch_size = min(batch_size // 2, len(batch))
-                    if new_batch_size < 1:
-                        raise batch_error
-                    batch_size = new_batch_size
-                    print(f"   Using reduced batch size: {batch_size}")
-                    # Don't increment i, so we retry the same batch with smaller size
-                    continue
-                else:
-                    raise
-
-        print(f"✓ Successfully ingested {len(nodes)} nodes in {total_batches} batch(es)")
+        csv_docs = load_faculty_csv(csv_path)
+        print(f"✓ Loaded {len(csv_docs)} faculty profiles from CSV")
     except Exception as e:
-        print(f"✗ Error during ingestion: {e}")
-        raise
+        print(f"✗ Error loading CSV: {e}")
+
+    try:
+        pdf_docs = load_pdfs_from_directory(pdf_dir)
+        print(f"✓ Loaded {len(pdf_docs)} PDF documents")
+    except Exception as e:
+        print(f"✗ Error loading PDFs: {e}")
+
+    if not csv_docs and not pdf_docs:
+        print("\n⚠ No documents loaded. Please check your data directory.")
+        return 0
+
+    total_nodes = 0
+
+    # Step 2: Ingest PDFs into faculty_pdfs collection
+    if pdf_docs:
+        print("\n[Step 2] Ingesting PDFs into faculty_pdfs collection...")
+        pdf_node_count, pdf_nodes = await _ingest_documents_to_collection(
+            pdf_docs,
+            Config.FACULTY_PDFS_COLLECTION,
+            reset=reset_collection
+        )
+        total_nodes += pdf_node_count
+    else:
+        print("\n[Step 2] No PDFs to ingest, skipping...")
+
+    # Step 3: Enrich CSV documents with PDF information (if enabled and PDFs exist)
+    enriched_csv_docs = csv_docs
+    if enable_enrichment and csv_docs and pdf_docs:
+        print("\n[Step 3] Enriching faculty profiles with PDF information...")
+        try:
+            # Get the PDF collection
+            pdf_collection = get_or_create_collection(Config.FACULTY_PDFS_COLLECTION)
+
+            # Get list of faculty IDs
+            faculty_ids = [doc.metadata.get("faculty_id") for doc in csv_docs if doc.metadata.get("faculty_id")]
+
+            if faculty_ids:
+                # Query PDF collection for each faculty_id
+                pdf_nodes_by_faculty = get_pdf_nodes_by_faculty(pdf_collection, faculty_ids)
+
+                # Enrich CSV documents
+                llm = get_llm()
+                enriched_csv_docs = enrich_csv_documents(csv_docs, pdf_nodes_by_faculty, llm)
+            else:
+                print("  ⚠ No faculty_ids found in CSV, skipping enrichment")
+        except Exception as e:
+            print(f"  ⚠ Error during enrichment: {e}")
+            print(f"  Continuing with non-enriched CSV documents...")
+            enriched_csv_docs = csv_docs
+    else:
+        print("\n[Step 3] Enrichment disabled or no data to enrich, skipping...")
+
+    # Step 4: Ingest (enriched) CSV documents into faculty_profiles collection
+    if enriched_csv_docs:
+        print("\n[Step 4] Ingesting faculty profiles into faculty_profiles collection...")
+        csv_node_count, csv_nodes = await _ingest_documents_to_collection(
+            enriched_csv_docs,
+            Config.FACULTY_PROFILES_COLLECTION,
+            reset=reset_collection
+        )
+        total_nodes += csv_node_count
+    else:
+        print("\n[Step 4] No CSV documents to ingest, skipping...")
 
     # Step 5: Summary
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 80)
     print("Ingestion Complete!")
-    print("=" * 60)
-    print(f"Documents processed: {len(documents)}")
-    print(f"Nodes created: {len(all_nodes)}")
-    print(f"Collection: {Config.COLLECTION_NAME}")
+    print("=" * 80)
+    print(f"Faculty profiles (CSV): {len(csv_docs)} documents")
+    print(f"PDF documents: {len(pdf_docs)} documents")
+    print(f"Total nodes created: {total_nodes}")
+    print(f"Collections:")
+    print(f"  - {Config.FACULTY_PROFILES_COLLECTION} (recommendations)")
+    print(f"  - {Config.FACULTY_PDFS_COLLECTION} (evidence)")
     print(f"Storage: {Config.CHROMA_PATH}")
-    print("=" * 60)
+    print("=" * 80)
 
-    return len(all_nodes)
+    return total_nodes
 
 
 def run_ingestion_pipeline_sync(
     csv_path: Optional[str] = None,
     pdf_dir: Optional[str] = None,
     reset_collection: bool = False,
+    enable_enrichment: bool = True,
 ) -> int:
     """
     Synchronous wrapper for the ingestion pipeline.
@@ -151,10 +216,11 @@ def run_ingestion_pipeline_sync(
     Args:
         csv_path: Path to faculty CSV file. Defaults to Config.CSV_PATH.
         pdf_dir: Path to PDF directory. Defaults to Config.PDF_DIR.
-        reset_collection: If True, delete existing collection and start fresh.
+        reset_collection: If True, delete existing collections and start fresh.
+        enable_enrichment: If True, enrich faculty profiles with PDF data.
 
     Returns:
-        int: Number of nodes ingested.
+        int: Total number of nodes ingested.
     """
     import asyncio
     import nest_asyncio
@@ -163,7 +229,7 @@ def run_ingestion_pipeline_sync(
     nest_asyncio.apply()
 
     return asyncio.run(
-        run_ingestion_pipeline(csv_path, pdf_dir, reset_collection)
+        run_ingestion_pipeline(csv_path, pdf_dir, reset_collection, enable_enrichment)
     )
 
 

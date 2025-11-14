@@ -29,6 +29,10 @@ class Config:
     CHROMA_PATH = os.getenv("CHROMA_PATH", "./faculty_chroma_db")
     COLLECTION_NAME = os.getenv("COLLECTION_NAME", "faculty_all")
 
+    # Separate collections for dual-store architecture
+    FACULTY_PROFILES_COLLECTION = os.getenv("FACULTY_PROFILES_COLLECTION", "faculty_profiles")
+    FACULTY_PDFS_COLLECTION = os.getenv("FACULTY_PDFS_COLLECTION", "faculty_pdfs")
+
     # Model Configuration
     EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
     LLM_MODEL = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-Coder-1.5B-Instruct")
