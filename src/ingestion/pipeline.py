@@ -8,9 +8,10 @@ from src.utils.config import Config
 from src.models.embeddings import get_embedding_model
 from src.models.llm import get_llm
 from src.indexing.vector_store import get_vector_store, get_or_create_collection
-from src.ingestion.csv_loader import load_faculty_csv
+from src.ingestion.csv_loader import load_faculty_csv, validate_csv_format
 from src.ingestion.pdf_loader import load_pdfs_from_directory
 from src.ingestion.enrichment import enrich_csv_documents, get_pdf_nodes_by_faculty
+from src.ingestion.website_crawler import crawl_faculty_websites
 
 
 async def _ingest_documents_to_collection(
@@ -90,6 +91,7 @@ async def run_ingestion_pipeline(
     pdf_dir: Optional[str] = None,
     reset_collection: bool = False,
     enable_enrichment: bool = True,
+    enable_website_crawling: bool = True,
 ) -> int:
     """
     Run the complete dual-store ingestion pipeline with enrichment.
@@ -99,15 +101,17 @@ async def run_ingestion_pipeline(
     2. Ingests PDFs into faculty_pdfs collection
     3. Ingests CSV docs into faculty_profiles collection
     4. (Optional) Enriches CSV docs with PDF information and re-ingests
+    5. (Optional) Crawls faculty websites and ingests into faculty_websites collection
 
     Args:
         csv_path: Path to faculty CSV file. Defaults to Config.CSV_PATH.
         pdf_dir: Path to PDF directory. Defaults to Config.PDF_DIR.
         reset_collection: If True, delete existing collections and start fresh.
         enable_enrichment: If True, enrich faculty profiles with PDF data.
+        enable_website_crawling: If True, crawl faculty websites and lab websites.
 
     Returns:
-        int: Total number of nodes ingested across both collections.
+        int: Total number of nodes ingested across all collections.
     """
     print("=" * 80)
     print("Starting Dual-Store Ingestion Pipeline with Enrichment")
@@ -118,6 +122,30 @@ async def run_ingestion_pipeline(
 
     csv_docs = []
     pdf_docs = []
+
+    # Validate CSV format before loading
+    try:
+        print("\n[Validation] Validating CSV format...")
+        validation = validate_csv_format(csv_path)
+
+        if not validation.get("valid"):
+            print(f"✗ CSV validation failed: {validation.get('error', 'Unknown error')}")
+            raise ValueError(f"CSV validation failed: {validation.get('error', 'Unknown error')}")
+
+        print(f"✓ CSV validation passed")
+        print(f"  Path: {validation['path']}")
+        print(f"  Rows: {validation['rows']}")
+        print(f"  Columns: {len(validation['columns'])}")
+
+        if validation.get('missing_recommended_columns'):
+            missing = validation['missing_recommended_columns']
+            print(f"  ⚠ Warning: Missing recommended columns: {', '.join(missing)}")
+            print(f"    Recommended columns: {', '.join(validation['recommended_columns'])}")
+        else:
+            print(f"  ✓ All recommended columns present")
+    except FileNotFoundError:
+        # CSV file doesn't exist, will be handled below
+        pass
 
     try:
         csv_docs = load_faculty_csv(csv_path)
@@ -188,16 +216,50 @@ async def run_ingestion_pipeline(
     else:
         print("\n[Step 4] No CSV documents to ingest, skipping...")
 
-    # Step 5: Summary
+    # Step 5: Crawl and ingest faculty websites
+    website_docs = []
+    website_node_count = 0
+    if enable_website_crawling and enriched_csv_docs:
+        print("\n[Step 5] Crawling faculty websites and lab websites...")
+        try:
+            website_docs = crawl_faculty_websites(
+                enriched_csv_docs,
+                max_pages_per_site=20,
+                max_depth=3,
+                timeout=30,
+                rate_limit_delay=1.0
+            )
+
+            if website_docs:
+                print(f"\n[Step 5] Ingesting {len(website_docs)} website pages into {Config.FACULTY_WEBSITES_COLLECTION} collection...")
+                website_node_count, website_nodes = await _ingest_documents_to_collection(
+                    website_docs,
+                    Config.FACULTY_WEBSITES_COLLECTION,
+                    reset=reset_collection
+                )
+                total_nodes += website_node_count
+                print(f"  ✓ Ingested {website_node_count} nodes from websites")
+            else:
+                print("  ⚠ No website pages crawled")
+        except Exception as e:
+            print(f"  ⚠ Error during website crawling: {e}")
+            print(f"  Continuing without website data...")
+    else:
+        print("\n[Step 5] Website crawling disabled or no CSV data, skipping...")
+
+    # Step 6: Summary
     print("\n" + "=" * 80)
     print("Ingestion Complete!")
     print("=" * 80)
     print(f"Faculty profiles (CSV): {len(csv_docs)} documents")
     print(f"PDF documents: {len(pdf_docs)} documents")
+    print(f"Website pages: {len(website_docs)} documents")
     print(f"Total nodes created: {total_nodes}")
     print(f"Collections:")
     print(f"  - {Config.FACULTY_PROFILES_COLLECTION} (recommendations)")
     print(f"  - {Config.FACULTY_PDFS_COLLECTION} (evidence)")
+    if website_node_count > 0:
+        print(f"  - {Config.FACULTY_WEBSITES_COLLECTION} (websites)")
     print(f"Storage: {Config.CHROMA_PATH}")
     print("=" * 80)
 
@@ -209,6 +271,7 @@ def run_ingestion_pipeline_sync(
     pdf_dir: Optional[str] = None,
     reset_collection: bool = False,
     enable_enrichment: bool = True,
+    enable_website_crawling: bool = True,
 ) -> int:
     """
     Synchronous wrapper for the ingestion pipeline.
@@ -218,6 +281,7 @@ def run_ingestion_pipeline_sync(
         pdf_dir: Path to PDF directory. Defaults to Config.PDF_DIR.
         reset_collection: If True, delete existing collections and start fresh.
         enable_enrichment: If True, enrich faculty profiles with PDF data.
+        enable_website_crawling: If True, crawl faculty websites and lab websites.
 
     Returns:
         int: Total number of nodes ingested.
@@ -229,7 +293,7 @@ def run_ingestion_pipeline_sync(
     nest_asyncio.apply()
 
     return asyncio.run(
-        run_ingestion_pipeline(csv_path, pdf_dir, reset_collection, enable_enrichment)
+        run_ingestion_pipeline(csv_path, pdf_dir, reset_collection, enable_enrichment, enable_website_crawling)
     )
 
 
@@ -253,13 +317,20 @@ def preview_documents(csv_path: Optional[str] = None, pdf_dir: Optional[str] = N
 
     # Preview CSV
     try:
-        csv_docs = load_faculty_csv(csv_path)
-        preview["csv"]["count"] = len(csv_docs)
-        if csv_docs:
-            preview["csv"]["sample"] = {
-                "text": csv_docs[0].text[:200] + "...",
-                "metadata": csv_docs[0].metadata,
-            }
+        # Validate CSV format first
+        validation = validate_csv_format(csv_path)
+        preview["csv"]["validation"] = validation
+
+        if validation.get("valid"):
+            csv_docs = load_faculty_csv(csv_path)
+            preview["csv"]["count"] = len(csv_docs)
+            if csv_docs:
+                preview["csv"]["sample"] = {
+                    "text": csv_docs[0].text[:200] + "...",
+                    "metadata": csv_docs[0].metadata,
+                }
+        else:
+            preview["csv"]["error"] = validation.get("error", "Validation failed")
     except Exception as e:
         preview["csv"]["error"] = str(e)
 

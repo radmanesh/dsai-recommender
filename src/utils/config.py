@@ -32,10 +32,11 @@ class Config:
     # Separate collections for dual-store architecture
     FACULTY_PROFILES_COLLECTION = os.getenv("FACULTY_PROFILES_COLLECTION", "faculty_profiles")
     FACULTY_PDFS_COLLECTION = os.getenv("FACULTY_PDFS_COLLECTION", "faculty_pdfs")
+    FACULTY_WEBSITES_COLLECTION = os.getenv("FACULTY_WEBSITES_COLLECTION", "faculty_websites")
 
     # Model Configuration
     EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
-    LLM_MODEL = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-Coder-1.5B-Instruct")
+    LLM_MODEL = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
 
     # LLM Parameters
     LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
