@@ -6,6 +6,9 @@ from llama_index.core import SimpleDirectoryReader, Document
 from src.utils.config import Config
 from src.models.llm import get_llm
 from src.utils.faculty_id import load_faculty_id_mapping, map_name_to_faculty_id
+from src.utils.logger import get_logger, debug, info, warning, error, verbose
+
+logger = get_logger(__name__)
 
 
 def _extract_metadata_with_llm(text: str, llm=None) -> Dict[str, Optional[str]]:
@@ -19,15 +22,21 @@ def _extract_metadata_with_llm(text: str, llm=None) -> Dict[str, Optional[str]]:
     Returns:
         Dict with keys: summary, research_interests, faculty_name
     """
+    debug("Extracting metadata from PDF text using LLM...")
+    verbose(f"Input text length: {len(text)} characters")
+
     if llm is None:
+        debug("Initializing LLM for metadata extraction...")
         llm = get_llm()
 
     # Truncate text if too long (keep first portion which usually has key info)
     max_chars = 10000
     if len(text) > max_chars:
         text_sample = text[:max_chars] + "\n\n[... text truncated ...]"
+        debug(f"Text truncated from {len(text)} to {max_chars} characters")
     else:
         text_sample = text
+        debug(f"Text length within limit: {len(text)} characters")
 
     prompt = f"""You are an expert academic document analyzer. Analyze the following document and extract key information.
 
@@ -48,11 +57,17 @@ RESEARCH_INTERESTS: [interest1, interest2, interest3, ... or N/A]
 
 Be specific and use technical terminology where appropriate."""
 
+    verbose(f"Prompt length: {len(prompt)} characters")
+    debug("Querying LLM for metadata extraction...")
+
     try:
         response = llm.complete(prompt)
         response_text = str(response)
+        debug(f"LLM response received: {len(response_text)} characters")
+        verbose(f"LLM response preview: {response_text[:300]}...")
 
         # Parse response
+        debug("Parsing LLM response...")
         result = {
             "faculty_name": None,
             "summary": None,
@@ -60,6 +75,7 @@ Be specific and use technical terminology where appropriate."""
         }
 
         lines = response_text.strip().split("\n")
+        verbose(f"Response has {len(lines)} lines")
         current_field = None
         summary_lines = []
 
@@ -87,9 +103,19 @@ Be specific and use technical terminology where appropriate."""
 
         result["summary"] = " ".join(summary_lines) if summary_lines else None
 
+        debug("Metadata extraction complete")
+        verbose(f"Extracted: faculty_name={bool(result['faculty_name'])}, summary={bool(result['summary'])}, research_interests={bool(result['research_interests'])}")
+        if result['faculty_name']:
+            verbose(f"Faculty name: {result['faculty_name']}")
+        if result['summary']:
+            verbose(f"Summary preview: {result['summary'][:100]}...")
+        if result['research_interests']:
+            verbose(f"Research interests: {result['research_interests']}")
+
         return result
     except Exception as e:
-        print(f"  ⚠ Error extracting metadata with LLM: {e}")
+        error(f"Error extracting metadata with LLM: {e}")
+        verbose(f"Metadata extraction exception: {type(e).__name__}: {str(e)}")
         return {
             "faculty_name": None,
             "summary": None,
@@ -110,16 +136,20 @@ def load_pdfs_from_directory(pdf_dir: str = None, extract_metadata: bool = None)
         List[Document]: List of LlamaIndex Document objects.
     """
     dir_path = Path(pdf_dir) if pdf_dir else Config.PDF_DIR
+    info(f"Loading PDFs from directory: {dir_path}")
 
     if not dir_path.exists():
-        print(f"Warning: PDF directory not found: {dir_path}")
-        print("Creating directory...")
+        warning(f"PDF directory not found: {dir_path}")
+        info("Creating directory...")
         dir_path.mkdir(parents=True, exist_ok=True)
+        debug(f"Created directory: {dir_path}")
         return []
 
-    print(f"Loading PDFs from: {dir_path}")
+    debug(f"PDF directory exists: {dir_path}")
+    verbose(f"Directory contents: {list(dir_path.iterdir())[:5]}...")
 
     # Use SimpleDirectoryReader to load PDFs
+    debug("Initializing SimpleDirectoryReader for PDFs...")
     reader = SimpleDirectoryReader(
         input_dir=str(dir_path),
         recursive=True,
@@ -127,12 +157,15 @@ def load_pdfs_from_directory(pdf_dir: str = None, extract_metadata: bool = None)
     )
 
     try:
+        debug("Loading PDF documents...")
         documents = reader.load_data()
-        print(f"Loaded {len(documents)} documents from PDFs")
+        info(f"Loaded {len(documents)} documents from PDFs")
+        verbose(f"Document sources: {[doc.metadata.get('file_name', 'unknown') for doc in documents[:5]]}...")
 
         # Use config default if extract_metadata not specified
         if extract_metadata is None:
             extract_metadata = Config.EXTRACT_PDF_METADATA_WITH_LLM
+        debug(f"Extract metadata with LLM: {extract_metadata}")
 
         # Group documents by file (PDFs may be split into multiple pages)
         documents_by_file = {}
@@ -142,67 +175,107 @@ def load_pdfs_from_directory(pdf_dir: str = None, extract_metadata: bool = None)
                 documents_by_file[file_name] = []
             documents_by_file[file_name].append(doc)
 
+        debug(f"Grouped documents into {len(documents_by_file)} PDF files")
+        verbose(f"PDF files: {list(documents_by_file.keys())[:5]}...")
+
         # Load faculty_id mapping from CSV
+        debug("Loading faculty_id mapping from CSV...")
         faculty_name_to_id = load_faculty_id_mapping()
+        debug(f"Loaded {len(faculty_name_to_id)} faculty name mappings")
+        verbose(f"Faculty mappings preview: {list(faculty_name_to_id.items())[:3]}...")
 
         # Enhance metadata for each document group
         llm = get_llm() if extract_metadata else None
+        if extract_metadata:
+            debug("LLM initialized for metadata extraction")
         enhanced_documents = []
 
-        for file_name, doc_group in documents_by_file.items():
+        info(f"Processing {len(documents_by_file)} PDF files for metadata enhancement...")
+        for i, (file_name, doc_group) in enumerate(documents_by_file.items(), 1):
+            debug(f"Processing PDF {i}/{len(documents_by_file)}: {file_name} ({len(doc_group)} pages)")
             # Combine all pages for this PDF
             full_text = "\n\n".join([doc.text for doc in doc_group])
+            verbose(f"Combined text length for {file_name}: {len(full_text)} characters")
 
             # Extract metadata from filename first
             doc_type = _infer_pdf_type(file_name)
+            debug(f"Inferred PDF type: {doc_type}")
             faculty_name_from_filename = _extract_faculty_name_from_filename(file_name)
+            if faculty_name_from_filename:
+                debug(f"Extracted faculty name from filename: {faculty_name_from_filename}")
+            else:
+                debug(f"Could not extract faculty name from filename: {file_name}")
 
             # Extract metadata with LLM if enabled
             llm_metadata = {}
             if extract_metadata and full_text.strip():
-                print(f"  Extracting metadata from: {file_name}...")
+                info(f"Extracting metadata from: {file_name}...")
                 llm_metadata = _extract_metadata_with_llm(full_text, llm)
+                debug(f"LLM metadata extraction complete for {file_name}")
 
             # Determine faculty_name for this PDF
             faculty_name = None
             if llm_metadata.get("faculty_name"):
                 faculty_name = llm_metadata["faculty_name"]
+                debug(f"Using faculty name from LLM: {faculty_name}")
             elif faculty_name_from_filename:
                 faculty_name = faculty_name_from_filename
+                debug(f"Using faculty name from filename: {faculty_name}")
+            else:
+                debug(f"No faculty name found for {file_name}")
 
             # Map faculty_name to faculty_id
             faculty_id = None
             if faculty_name:
+                debug(f"Mapping faculty name '{faculty_name}' to faculty_id...")
                 faculty_id = map_name_to_faculty_id(faculty_name, faculty_name_to_id)
+                if faculty_id:
+                    debug(f"Mapped to faculty_id: {faculty_id}")
+                else:
+                    warning(f"Could not map faculty name '{faculty_name}' to faculty_id")
 
             # Apply metadata to all documents in this group
-            for doc in doc_group:
+            verbose(f"Applying metadata to {len(doc_group)} document pages...")
+            for j, doc in enumerate(doc_group, 1):
                 doc.metadata["source"] = "pdf"
                 doc.metadata["type"] = "faculty_pdf"  # Changed to "faculty_pdf" for dual-store architecture
 
                 # Faculty name
                 if faculty_name:
                     doc.metadata["faculty_name"] = faculty_name
+                    verbose(f"  Page {j}: Added faculty_name: {faculty_name}")
 
                 # Faculty ID (for linking to CSV profiles)
                 if faculty_id:
                     doc.metadata["faculty_id"] = faculty_id
+                    verbose(f"  Page {j}: Added faculty_id: {faculty_id}")
 
                 # Add LLM-extracted metadata
                 if llm_metadata.get("summary"):
                     doc.metadata["summary"] = llm_metadata["summary"]
+                    verbose(f"  Page {j}: Added summary ({len(llm_metadata['summary'])} chars)")
                 if llm_metadata.get("research_interests"):
-                    doc.metadata["research_interests"] = ", ".join(llm_metadata["research_interests"])
+                    interests_str = ", ".join(llm_metadata["research_interests"])
+                    doc.metadata["research_interests"] = interests_str
+                    verbose(f"  Page {j}: Added research_interests: {interests_str[:50]}...")
 
                 # Add document type (cv, paper, etc.)
                 doc.metadata["pdf_type"] = doc_type
+                verbose(f"  Page {j}: Added pdf_type: {doc_type}")
 
             enhanced_documents.extend(doc_group)
+            debug(f"Enhanced {len(doc_group)} pages for {file_name}")
+
+        info(f"PDF loading complete: {len(enhanced_documents)} documents processed")
+        debug(f"Total enhanced documents: {len(enhanced_documents)}")
+        faculty_ids_found = set(doc.metadata.get("faculty_id") for doc in enhanced_documents if doc.metadata.get("faculty_id"))
+        debug(f"Faculty IDs found: {len(faculty_ids_found)} unique IDs")
 
         return enhanced_documents
 
     except Exception as e:
-        print(f"Error loading PDFs: {e}")
+        error(f"Error loading PDFs: {e}")
+        verbose(f"PDF loading exception: {type(e).__name__}: {str(e)}")
         return []
 
 
@@ -219,75 +292,104 @@ def load_single_pdf(pdf_path: str, extract_metadata: bool = None) -> List[Docume
         List[Document]: List of Document objects (may be multiple pages).
     """
     path = Path(pdf_path)
+    info(f"Loading single PDF: {path}")
 
     if not path.exists():
+        error(f"PDF file not found: {path}")
         raise FileNotFoundError(f"PDF file not found: {path}")
 
-    print(f"Loading PDF: {path}")
+    debug(f"PDF file exists: {path}")
+    verbose(f"File size: {path.stat().st_size} bytes")
 
     reader = SimpleDirectoryReader(input_files=[str(path)])
+    debug("Initialized SimpleDirectoryReader for single PDF")
 
     try:
+        debug("Loading PDF documents...")
         documents = reader.load_data()
-        print(f"Loaded {len(documents)} documents from PDF")
+        info(f"Loaded {len(documents)} documents from PDF")
+        verbose(f"Documents metadata: {[doc.metadata for doc in documents[:2]]}...")
 
         # Combine all pages
         full_text = "\n\n".join([doc.text for doc in documents])
+        debug(f"Combined text length: {len(full_text)} characters")
 
         # Extract metadata from filename
         doc_type = _infer_pdf_type(path.name)
+        debug(f"Inferred PDF type: {doc_type}")
         faculty_name_from_filename = _extract_faculty_name_from_filename(path.name)
+        if faculty_name_from_filename:
+            debug(f"Extracted faculty name from filename: {faculty_name_from_filename}")
 
         # Use config default if extract_metadata not specified
         if extract_metadata is None:
             extract_metadata = Config.EXTRACT_PDF_METADATA_WITH_LLM
+        debug(f"Extract metadata with LLM: {extract_metadata}")
 
         # Extract metadata with LLM if enabled
         llm_metadata = {}
         if extract_metadata and full_text.strip():
-            print(f"  Extracting metadata from: {path.name}...")
+            info(f"Extracting metadata from: {path.name}...")
             llm = get_llm()
             llm_metadata = _extract_metadata_with_llm(full_text, llm)
+            debug(f"LLM metadata extraction complete")
 
         # Determine faculty_name for this PDF
         faculty_name = None
         if llm_metadata.get("faculty_name"):
             faculty_name = llm_metadata["faculty_name"]
+            debug(f"Using faculty name from LLM: {faculty_name}")
         elif faculty_name_from_filename:
             faculty_name = faculty_name_from_filename
+            debug(f"Using faculty name from filename: {faculty_name}")
 
         # Load faculty_id mapping and map faculty_name to faculty_id
+        debug("Loading faculty_id mapping from CSV...")
         faculty_name_to_id = load_faculty_id_mapping()
         faculty_id = None
         if faculty_name:
+            debug(f"Mapping faculty name '{faculty_name}' to faculty_id...")
             faculty_id = map_name_to_faculty_id(faculty_name, faculty_name_to_id)
+            if faculty_id:
+                debug(f"Mapped to faculty_id: {faculty_id}")
+            else:
+                warning(f"Could not map faculty name '{faculty_name}' to faculty_id")
 
         # Enhance metadata
-        for doc in documents:
+        debug(f"Enhancing metadata for {len(documents)} document pages...")
+        for i, doc in enumerate(documents, 1):
             doc.metadata["source"] = "pdf"
             doc.metadata["type"] = "faculty_pdf"  # Changed to "faculty_pdf" for dual-store architecture
 
             # Faculty name
             if faculty_name:
                 doc.metadata["faculty_name"] = faculty_name
+                verbose(f"  Page {i}: Added faculty_name: {faculty_name}")
 
             # Faculty ID (for linking to CSV profiles)
             if faculty_id:
                 doc.metadata["faculty_id"] = faculty_id
+                verbose(f"  Page {i}: Added faculty_id: {faculty_id}")
 
             # Add LLM-extracted metadata
             if llm_metadata.get("summary"):
                 doc.metadata["summary"] = llm_metadata["summary"]
+                verbose(f"  Page {i}: Added summary ({len(llm_metadata['summary'])} chars)")
             if llm_metadata.get("research_interests"):
-                doc.metadata["research_interests"] = ", ".join(llm_metadata["research_interests"])
+                interests_str = ", ".join(llm_metadata["research_interests"])
+                doc.metadata["research_interests"] = interests_str
+                verbose(f"  Page {i}: Added research_interests: {interests_str[:50]}...")
 
             # Add document type (cv, paper, etc.)
             doc.metadata["pdf_type"] = doc_type
+            verbose(f"  Page {i}: Added pdf_type: {doc_type}")
 
+        info(f"Single PDF loading complete: {len(documents)} documents processed")
         return documents
 
     except Exception as e:
-        print(f"Error loading PDF {path}: {e}")
+        error(f"Error loading PDF {path}: {e}")
+        verbose(f"Single PDF loading exception: {type(e).__name__}: {str(e)}")
         return []
 
 
@@ -302,15 +404,19 @@ def _infer_pdf_type(filename: str) -> str:
         str: Inferred type (cv, paper, proposal, or document).
     """
     filename_lower = filename.lower()
+    verbose(f"Inferring PDF type from filename: {filename}")
 
     if "cv" in filename_lower or "resume" in filename_lower:
-        return "cv"
+        doc_type = "cv"
     elif "paper" in filename_lower or "publication" in filename_lower:
-        return "paper"
+        doc_type = "paper"
     elif "proposal" in filename_lower:
-        return "proposal"
+        doc_type = "proposal"
     else:
-        return "document"
+        doc_type = "document"
+
+    debug(f"Inferred type '{doc_type}' for {filename}")
+    return doc_type
 
 
 def _extract_faculty_name_from_filename(filename: str) -> Optional[str]:
@@ -328,8 +434,10 @@ def _extract_faculty_name_from_filename(filename: str) -> Optional[str]:
     Returns:
         Optional[str]: Extracted faculty name or None.
     """
+    verbose(f"Extracting faculty name from filename: {filename}")
     # Remove extension
     name_part = Path(filename).stem
+    debug(f"Filename stem: {name_part}")
 
     # Look for common separators before type indicators
     for separator in ["_CV", "_cv", "_Paper", "_paper", "_Proposal", "_proposal"]:
@@ -337,13 +445,16 @@ def _extract_faculty_name_from_filename(filename: str) -> Optional[str]:
             faculty_part = name_part.split(separator)[0]
             # Replace underscores/dots with spaces and title case
             faculty_name = faculty_part.replace("_", " ").replace(".", " ").title()
+            debug(f"Extracted faculty name using separator '{separator}': {faculty_name}")
             return faculty_name
 
     # If no separator found, assume the entire filename is the faculty name
     if name_part:  # Make sure it's not empty
         faculty_name = name_part.replace("_", " ").replace(".", " ").title()
+        debug(f"Using entire filename as faculty name: {faculty_name}")
         return faculty_name
 
+    debug(f"Could not extract faculty name from: {filename}")
     return None
 
 def get_pdf_stats(pdf_dir: str = None) -> dict:
@@ -357,15 +468,19 @@ def get_pdf_stats(pdf_dir: str = None) -> dict:
         dict: Statistics about the PDFs.
     """
     dir_path = Path(pdf_dir) if pdf_dir else Config.PDF_DIR
+    debug(f"Getting PDF statistics for directory: {dir_path}")
 
     if not dir_path.exists():
+        warning(f"PDF directory not found for stats: {dir_path}")
         return {
             "exists": False,
             "path": str(dir_path),
             "pdf_count": 0,
         }
 
+    debug(f"Scanning for PDF files in: {dir_path}")
     pdf_files = list(dir_path.rglob("*.pdf"))
+    info(f"Found {len(pdf_files)} PDF files")
 
     stats = {
         "exists": True,
@@ -381,6 +496,7 @@ def get_pdf_stats(pdf_dir: str = None) -> dict:
         type_counts[pdf_type] = type_counts.get(pdf_type, 0) + 1
 
     stats["type_counts"] = type_counts
+    debug(f"PDF type distribution: {type_counts}")
 
     return stats
 

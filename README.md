@@ -7,13 +7,15 @@ An intelligent recommendation system that matches Ph.D. proposals to OU faculty 
 This system uses:
 - **LlamaIndex** for document processing and indexing
 - **ChromaDB** for vector storage
-- **Qwen2.5-Coder-1.5B-Instruct** for reasoning (runs locally)
+- **Qwen2.5-1.5B-Instruct** for reasoning (runs locally)
 - **HuggingFace BGE embeddings** (BAAI/bge-small-en-v1.5) for semantic search
 - **LangChain** for multi-agent orchestration
+- **requests & BeautifulSoup4** for website crawling
 
 ## Features
 
 - 📄 Ingest faculty data from CSV and PDFs (CVs, papers, proposals)
+- 🌐 Automatic website crawling for faculty and lab websites
 - 🔍 Semantic search over structured and unstructured faculty information
 - 🤖 Multi-agent system for proposal analysis and faculty matching
 - 💡 Natural language explanations for recommendations
@@ -78,7 +80,13 @@ dsai-recommender/
 ```bash
 git clone <repository-url>
 cd dsai-recommender
+```
 
+#### Option A: Using Mamba (Recommended)
+
+Mamba is a faster drop-in replacement for conda:
+
+```bash
 # Create mamba environment
 mamba create -n recommender python=3.10
 mamba activate recommender
@@ -87,12 +95,33 @@ mamba activate recommender
 pip install -r requirements.txt
 ```
 
-**Note:** If using virtualenv instead:
+#### Option B: Using Conda
+
+If you prefer conda:
+
+```bash
+# Create conda environment
+conda create -n recommender python=3.10
+conda activate recommender
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+#### Option C: Using Virtualenv
+
+Alternative using Python's built-in venv:
+
 ```bash
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
+
+**Note:** After creating the environment, always activate it before running any scripts:
+- Mamba: `mamba activate recommender`
+- Conda: `conda activate recommender`
+- Virtualenv: `source venv/bin/activate` (Linux/Mac) or `venv\Scripts\activate` (Windows)
 
 ### 2. Check Your Hardware
 
@@ -113,15 +142,15 @@ cp .env.template .env
 Edit `.env` and add your HuggingFace token (needed for initial model download):
 ```
 HF_TOKEN=your_actual_token_here
-LLM_MODEL=Qwen/Qwen2.5-Coder-1.5B-Instruct  # Default, runs on CPU
+LLM_MODEL=Qwen/Qwen2.5-1.5B-Instruct  # Default, runs on CPU
 ```
 
 Get your token from: https://huggingface.co/settings/tokens
 
 **Available Models:**
-- `Qwen/Qwen2.5-Coder-1.5B-Instruct` - Best for CPU (~3GB)
-- `Qwen/Qwen2.5-Coder-3B-Instruct` - Medium, needs GPU/good CPU (~6GB)
-- `Qwen/Qwen2.5-Coder-7B-Instruct` - Large, needs GPU 8GB+ VRAM (~14GB)
+- `Qwen/Qwen2.5-1.5B-Instruct` - Best for CPU (~3GB)
+- `Qwen/Qwen2.5-3B-Instruct` - Medium, needs GPU/good CPU (~6GB)
+- `Qwen/Qwen2.5-7B-Instruct` - Large, needs GPU 8GB+ VRAM (~14GB)
 
 ### 4. Test Model Loading
 
@@ -139,6 +168,15 @@ Place your data files:
 
 ### 6. Ingest Data
 
+**Important:** Make sure your conda/mamba environment is activated:
+```bash
+# For mamba
+mamba activate recommender
+
+# For conda
+conda activate recommender
+```
+
 Run the ingestion pipeline to index all data:
 
 ```bash
@@ -147,16 +185,23 @@ python scripts/ingest.py
 
 This will:
 - Parse CSV and PDF files
+- Crawl faculty websites and lab websites (if URLs are provided in CSV)
 - Create embeddings using BGE
-- Store vectors in ChromaDB
+- Store vectors in ChromaDB collections:
+  - `faculty_profiles` - Faculty metadata from CSV
+  - `faculty_pdfs` - PDF documents (CVs, papers, etc.)
+  - `faculty_websites` - Crawled website content
 
 ## Usage
 
 ### Web Interface (Recommended)
 
-Launch the user-friendly web interface:
+**Important:** Make sure your conda/mamba environment is activated before running:
 
 ```bash
+# Activate environment first
+mamba activate recommender  # or: conda activate recommender
+
 # Method 1: Direct
 streamlit run app.py
 
@@ -175,9 +220,12 @@ Access at: **http://localhost:8501**
 
 ### Command-Line Interface
 
-For scripting and automation:
+**Important:** Make sure your conda/mamba environment is activated:
 
 ```bash
+# Activate environment first
+mamba activate recommender  # or: conda activate recommender
+
 # Command-line interface
 python scripts/match.py "Your proposal text here..."
 python scripts/match.py --file proposal.pdf
@@ -238,7 +286,7 @@ PDFs should be organized in `data/pdfs/` with clear naming:
 Key configuration options in `.env`:
 
 - `HF_TOKEN`: HuggingFace token (required for initial download)
-- `LLM_MODEL`: Local LLM model to use (default: Qwen2.5-Coder-1.5B-Instruct)
+- `LLM_MODEL`: Local LLM model to use (default: Qwen2.5-1.5B-Instruct)
 - `USE_8BIT_QUANTIZATION`: Reduce memory usage by 50% (GPU only, default: false)
 - `LLM_DEVICE`: Device to use (auto/cuda/cpu, default: auto)
 - `CHROMA_PATH`: ChromaDB storage path
@@ -247,6 +295,36 @@ Key configuration options in `.env`:
 - `TOP_K_RESULTS`: Number of results to retrieve
 - `CHUNK_SIZE`: Text chunk size for splitting
 - `CHUNK_OVERLAP`: Overlap between chunks
+- `DEBUG_LEVEL`: Debug logging level (ERROR=0, WARNING=1, INFO=2, DEBUG=3, VERBOSE=4, default: INFO)
+
+### Debug Levels
+
+The system supports configurable debug logging levels set via `DEBUG_LEVEL` environment variable:
+
+- **ERROR (0)**: Only error messages
+- **WARNING (1)**: Warnings and errors
+- **INFO (2)**: Informational messages, warnings, and errors (default)
+- **DEBUG (3)**: Detailed debug information including processing steps, metadata, and intermediate results
+- **VERBOSE (4)**: Very detailed output including timestamps, file paths, full metadata, and trace information
+
+**Usage:**
+```bash
+# Set debug level in .env
+DEBUG_LEVEL=DEBUG
+
+# Or as integer
+DEBUG_LEVEL=3
+
+# Or via environment variable
+export DEBUG_LEVEL=VERBOSE
+python scripts/ingest.py
+```
+
+**What gets logged:**
+
+- **INFO level**: Progress messages, completion status, summary statistics
+- **DEBUG level**: Processing details, collection names, node counts, faculty IDs, query strings
+- **VERBOSE level**: Full metadata, sample data, timestamps, file paths, exception details
 
 ## Deployment
 
@@ -281,14 +359,24 @@ streamlit run app.py --server.address 0.0.0.0
 After adding new CSV rows or PDFs, re-run ingestion:
 
 ```bash
+# Make sure environment is activated
+mamba activate recommender  # or: conda activate recommender
+
+# Re-run ingestion
 python scripts/ingest.py
 ```
+
+**Note:** The ingestion pipeline will:
+- Validate CSV format before processing
+- Re-index all faculty profiles
+- Re-crawl websites if `enable_website_crawling=True` (default)
+- Update all ChromaDB collections
 
 ## Troubleshooting
 
 ### Out of Memory
 
-- Use a smaller model: `LLM_MODEL=Qwen/Qwen2.5-Coder-1.5B-Instruct`
+- Use a smaller model: `LLM_MODEL=Qwen/Qwen2.5-1.5B-Instruct`
 - Enable 8-bit quantization (GPU only): `USE_8BIT_QUANTIZATION=true`
 - Force CPU mode: `LLM_DEVICE=cpu`
 - Close other applications
@@ -328,6 +416,7 @@ python scripts/ingest.py
 ## Acknowledgments
 
 - Built with LlamaIndex, ChromaDB, and LangChain
-- Powered by Qwen2.5-Coder-1.5B-Instruct (local) and BGE embeddings
+- Powered by Qwen2.5-1.5B-Instruct (local) and BGE embeddings
 - Web interface built with Streamlit
+- Website crawling with requests and BeautifulSoup4
 

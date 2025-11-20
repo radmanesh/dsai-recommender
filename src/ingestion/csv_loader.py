@@ -109,7 +109,7 @@ def validate_csv_format(csv_path: str = None) -> dict:
         df = pd.read_csv(path)
 
         # Check for recommended columns
-        recommended_cols = ['name', 'role', 'department', 'areas', 'research_interests']
+        recommended_cols = ['Name', 'Role', 'faculty_id', 'Areas', 'Research Interests', 'Website', 'Lab Website']
         missing_cols = [col for col in recommended_cols if col not in df.columns]
 
         info = {

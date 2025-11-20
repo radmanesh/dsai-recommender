@@ -74,7 +74,7 @@ def inspect_nodes(query: str = None, top_k: int = 10, show_full_text: bool = Fal
 
         print(f"\nMetadata:")
         # Display key fields first
-        key_fields = ['faculty_id', 'faculty_name', 'name', 'type', 'source', 'role', 'areas']
+        key_fields = ['faculty_id', 'faculty_name', 'name', 'type', 'source', 'source_type', 'role', 'areas', 'url', 'page_title', 'crawl_date']
         for key in key_fields:
             if key in node.metadata:
                 value = node.metadata[key]
@@ -224,6 +224,15 @@ def list_node_summaries(query: str = None, top_k: int = 20, collection_name: str
             pdf_type = node.metadata.get('pdf_type', 'N/A')
             print(f"   PDF Type: {pdf_type}")
 
+        # Display website info for website pages
+        if node.metadata.get('type') == 'faculty_website':
+            source_type = node.metadata.get('source_type', 'N/A')
+            url = node.metadata.get('url', 'N/A')
+            page_title = node.metadata.get('page_title', 'N/A')
+            print(f"   Source Type: {source_type} | URL: {url[:60]}...")
+            if page_title and page_title != 'N/A':
+                print(f"   Page Title: {page_title[:60]}...")
+
         text_preview = node.text[:100].replace('\n', ' ') + "..."
         print(f"   Text: {text_preview}")
         print()
@@ -355,13 +364,14 @@ def inspect_metadata_schema(collection_name: str = None):
     from collections import Counter, defaultdict
     from src.indexing.vector_store import get_or_create_collection
 
-    # Determine which collections to inspect
+        # Determine which collections to inspect
     if collection_name:
         collections_to_inspect = [(collection_name, get_or_create_collection(collection_name))]
     else:
         collections_to_inspect = [
             (Config.FACULTY_PROFILES_COLLECTION, get_or_create_collection(Config.FACULTY_PROFILES_COLLECTION)),
-            (Config.FACULTY_PDFS_COLLECTION, get_or_create_collection(Config.FACULTY_PDFS_COLLECTION))
+            (Config.FACULTY_PDFS_COLLECTION, get_or_create_collection(Config.FACULTY_PDFS_COLLECTION)),
+            (Config.FACULTY_WEBSITES_COLLECTION, get_or_create_collection(Config.FACULTY_WEBSITES_COLLECTION))
         ]
 
     for coll_name, collection in collections_to_inspect:
@@ -436,9 +446,10 @@ def inspect_metadata_schema(collection_name: str = None):
             bar = "█" * bar_length
             print(f"{doc_type:20s} | {bar} {type_count:4d} ({percentage:5.1f}%)")
 
-        # Check for profile and PDF entries
+        # Check for profile, PDF, and website entries
         profile_count = type_counts.get('faculty_profile', 0)
         pdf_count = type_counts.get('faculty_pdf', 0)
+        website_count = type_counts.get('faculty_website', 0)
         legacy_csv = type_counts.get('csv', 0)
         legacy_pdf = type_counts.get('pdf', 0)
 
@@ -448,11 +459,12 @@ def inspect_metadata_schema(collection_name: str = None):
         print(f"Total items:              {count}")
         print(f"Faculty profiles:         {profile_count}")
         print(f"Faculty PDFs:             {pdf_count}")
+        print(f"Faculty websites:         {website_count}")
         if legacy_csv > 0:
             print(f"Legacy CSV items:         {legacy_csv}")
         if legacy_pdf > 0:
             print(f"Legacy PDF items:         {legacy_pdf}")
-        print(f"Other items:              {count - profile_count - pdf_count - legacy_csv - legacy_pdf}")
+        print(f"Other items:              {count - profile_count - pdf_count - website_count - legacy_csv - legacy_pdf}")
         print(f"Unique fields:            {len(all_keys)}")
 
         # Show faculty info
@@ -502,6 +514,9 @@ Examples:
   # Inspect PDF collection
   python scripts/inspect_nodes.py -q "deep learning" -c pdfs
 
+  # Inspect websites collection
+  python scripts/inspect_nodes.py -q "machine learning" -c websites
+
   # Show full text of nodes
   python scripts/inspect_nodes.py -q "deep learning" -f
 
@@ -511,11 +526,11 @@ Examples:
   # Inspect a specific node by ID
   python scripts/inspect_nodes.py --id <node_id>
 
-  # Show metadata schema for both collections
+  # Show metadata schema for all collections
   python scripts/inspect_nodes.py --schema -c both
 
-  # Show metadata schema for profiles only
-  python scripts/inspect_nodes.py --schema -c profiles
+  # Show metadata schema for websites only
+  python scripts/inspect_nodes.py --schema -c websites
 
   # Show only faculty profile entries
   python scripts/inspect_nodes.py --csv
@@ -562,7 +577,7 @@ Examples:
     parser.add_argument(
         "--collection", "-c",
         type=str,
-        choices=["profiles", "pdfs", "both"],
+        choices=["profiles", "pdfs", "websites", "both"],
         default="profiles",
         help="Which collection to inspect (default: profiles)"
     )
@@ -573,6 +588,7 @@ Examples:
     collection_map = {
         "profiles": Config.FACULTY_PROFILES_COLLECTION,
         "pdfs": Config.FACULTY_PDFS_COLLECTION,
+        "websites": Config.FACULTY_WEBSITES_COLLECTION,
         "both": None
     }
     collection_name = collection_map.get(args.collection)

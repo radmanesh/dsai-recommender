@@ -5,6 +5,9 @@ from typing import Dict, List, Optional, Union
 from dataclasses import dataclass
 from src.ingestion.pdf_loader import load_single_pdf
 from src.models.llm import get_llm
+from src.utils.logger import get_logger, debug, info, warning, error, verbose
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -76,20 +79,30 @@ class ProposalAnalyzer:
         Returns:
             ProposalAnalysis: Structured analysis of the proposal.
         """
-        print(f"Analyzing proposal: {pdf_path}")
+        info(f"Analyzing proposal PDF: {pdf_path}")
+        debug(f"PDF path: {pdf_path}")
 
         # Load PDF
+        debug("Loading PDF file...")
         documents = load_single_pdf(str(pdf_path))
+        verbose(f"PDF loaded: {len(documents)} pages")
 
         if not documents:
+            error(f"Could not load PDF: {pdf_path}")
             raise ValueError(f"Could not load PDF: {pdf_path}")
 
         # Combine all pages
         full_text = "\n\n".join([doc.text for doc in documents])
+        debug(f"PDF text length: {len(full_text)} characters")
+        verbose(f"PDF preview: {full_text[:200]}...")
 
         # Analyze with LLM
+        debug("Starting LLM analysis...")
         analysis = self._analyze_text(full_text)
         analysis.full_text = full_text
+        debug(f"Analysis complete: domain={analysis.domain}, topics={len(analysis.topics)}, methods={len(analysis.methods)}")
+        verbose(f"Extracted topics: {analysis.topics}")
+        verbose(f"Extracted methods: {analysis.methods}")
 
         return analysis
 
@@ -103,9 +116,13 @@ class ProposalAnalyzer:
         Returns:
             ProposalAnalysis: Structured analysis of the proposal.
         """
-        print("Analyzing proposal text...")
+        info("Analyzing proposal text...")
+        debug(f"Text length: {len(text)} characters")
+        verbose(f"Text preview: {text[:200]}...")
         analysis = self._analyze_text(text)
         analysis.full_text = text
+        debug(f"Analysis complete: domain={analysis.domain}, topics={len(analysis.topics)}")
+        verbose(f"Extracted topics: {analysis.topics[:5]}")
         return analysis
 
     def _analyze_text(self, text: str) -> ProposalAnalysis:
@@ -121,19 +138,28 @@ class ProposalAnalyzer:
         # Truncate text if too long (keep first portion which usually has the key info)
         max_chars = 8000
         if len(text) > max_chars:
+            debug(f"Text too long ({len(text)} chars), truncating to {max_chars} chars")
             text_sample = text[:max_chars] + "\n\n[... text truncated ...]"
         else:
             text_sample = text
+            debug(f"Text length ({len(text)} chars) within limit")
 
         # Create analysis prompt
+        debug("Creating analysis prompt...")
         prompt = self._create_analysis_prompt(text_sample)
+        verbose(f"Prompt length: {len(prompt)} characters")
 
         # Query LLM
+        debug("Querying LLM for analysis...")
         response = self.llm.complete(prompt)
         response_text = str(response)
+        debug(f"LLM response received: {len(response_text)} characters")
+        verbose(f"LLM response preview: {response_text[:300]}...")
 
         # Parse response
+        debug("Parsing LLM response...")
         analysis = self._parse_llm_response(response_text)
+        verbose(f"Parsed analysis: domain={analysis.domain}, topics={analysis.topics}, methods={analysis.methods}")
 
         return analysis
 

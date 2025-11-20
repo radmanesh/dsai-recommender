@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from src.agents.faculty_retriever import FacultyMatch
 from src.agents.proposal_analyzer import ProposalAnalysis
 from src.models.llm import get_llm, get_llm_with_params
+from src.utils.logger import get_logger, debug, info, warning, error, verbose
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -61,27 +64,36 @@ class RecommendationAgent:
         Returns:
             List[FacultyRecommendation]: Ranked recommendations with explanations.
         """
-        print(f"Generating top {top_n} recommendations...")
+        info(f"Generating top {top_n} recommendations from {len(matches)} matches...")
+        debug(f"Matches: {[(m.faculty_name, m.score) for m in matches[:top_n]]}")
 
         # Take top matches
         top_matches = matches[:top_n]
+        verbose(f"Top {top_n} matches selected for recommendation generation")
 
         recommendations = []
 
         for i, match in enumerate(top_matches, 1):
-            print(f"  Generating recommendation {i}/{len(top_matches)}...")
+            info(f"Generating recommendation {i}/{len(top_matches)} for {match.faculty_name}...")
+            debug(f"Match details: name={match.faculty_name}, score={match.score:.4f}, source={match.source_type}")
+            verbose(f"Match metadata keys: {list(match.metadata.keys())}")
 
             # Generate explanation for this match
+            debug(f"Generating explanation for {match.faculty_name}...")
             explanation = self._generate_explanation(match, analysis)
+            verbose(f"Explanation: {explanation[:200]}...")
 
             # Extract research areas
             research_areas = self._extract_research_areas(match)
+            debug(f"Research areas: {research_areas}")
 
             # Extract contact info
             contact_info = self._extract_contact_info(match)
+            verbose(f"Contact info: {contact_info}")
 
             # Create supporting evidence summary
             supporting_evidence = self._create_supporting_evidence(match)
+            debug(f"Supporting evidence length: {len(supporting_evidence)} chars")
 
             recommendation = FacultyRecommendation(
                 rank=i,
@@ -94,8 +106,10 @@ class RecommendationAgent:
             )
 
             recommendations.append(recommendation)
+            debug(f"Recommendation {i} created for {recommendation.faculty_name}")
 
-        print(f"✓ Generated {len(recommendations)} recommendations")
+        info(f"Generated {len(recommendations)} recommendations")
+        verbose(f"Recommendations: {[(r.faculty_name, r.score) for r in recommendations]}")
         return recommendations
 
     def _generate_explanation(
@@ -142,8 +156,12 @@ Provide a clear, concise explanation (2-3 sentences) of why this faculty member 
 
 Explanation:"""
 
+        debug(f"Querying LLM for explanation (faculty: {match.faculty_name})...")
+        verbose(f"Explanation prompt length: {len(prompt)} characters")
         response = self.llm.complete(prompt)
         explanation = str(response).strip()
+        debug(f"Explanation generated: {len(explanation)} characters")
+        verbose(f"Explanation: {explanation[:200]}...")
 
         return explanation
 

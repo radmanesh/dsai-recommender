@@ -55,6 +55,11 @@ class Config:
     # Whether to use LLM to extract metadata (summary, research interests, faculty name) from PDFs
     EXTRACT_PDF_METADATA_WITH_LLM = os.getenv("EXTRACT_PDF_METADATA_WITH_LLM", "true").lower() == "true"
 
+    # Debug Configuration
+    # Debug levels: ERROR=0, WARNING=1, INFO=2, DEBUG=3, VERBOSE=4
+    # Can be set as integer (0-4) or string ("ERROR", "WARNING", "INFO", "DEBUG", "VERBOSE")
+    DEBUG_LEVEL = os.getenv("DEBUG_LEVEL", "INFO").upper()
+
     @classmethod
     def validate(cls):
         """Validate that required configuration is present."""
@@ -88,6 +93,7 @@ class Config:
             "top_k_results": cls.TOP_K_RESULTS,
             "chunk_size": cls.CHUNK_SIZE,
             "chunk_overlap": cls.CHUNK_OVERLAP,
+            "debug_level": cls.DEBUG_LEVEL,
         }
 
 

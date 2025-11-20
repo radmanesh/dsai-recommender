@@ -6,7 +6,10 @@ from llama_index.core.vector_stores import MetadataFilters, ExactMatchFilter
 from src.indexing.index_builder import IndexManager
 from src.agents.proposal_analyzer import ProposalAnalysis
 from src.utils.config import Config
+from src.utils.logger import get_logger, debug, info, warning, error, verbose
 from src.utils.name_matcher import normalize_faculty_name, names_match
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -54,8 +57,11 @@ class FacultyRetriever:
         self.pdfs_collection = pdfs_collection or Config.FACULTY_PDFS_COLLECTION
 
         # Create separate index managers for profiles and PDFs
+        debug(f"Initializing FacultyRetriever with collections: profiles={self.profiles_collection}, pdfs={self.pdfs_collection}")
+        debug(f"Retrieval parameters: top_k={self.top_k}")
         self.profiles_manager = IndexManager(collection_name=self.profiles_collection)
         self.pdfs_manager = IndexManager(collection_name=self.pdfs_collection)
+        verbose("IndexManager instances created for both collections")
 
     def retrieve_from_analysis(self, analysis: ProposalAnalysis) -> List[FacultyMatch]:
         """
@@ -68,29 +74,39 @@ class FacultyRetriever:
         Returns:
             List[FacultyMatch]: List of matched faculty profiles with PDF support.
         """
-        print(f"Retrieving top {self.top_k} faculty matches...")
+        info(f"Retrieving top {self.top_k} faculty matches from analysis...")
+        debug(f"Proposal analysis summary: domain={analysis.domain}, topics={analysis.topics[:3]}")
 
         # Create search query from analysis
         search_query = analysis.to_search_query()
-        print(f"Search query: {search_query}")
+        info(f"Search query: {search_query}")
+        verbose(f"Full analysis query: {search_query}")
+        debug(f"Analysis components: domain={analysis.domain}, topics={len(analysis.topics)}, methods={len(analysis.methods)}")
 
         # Retrieve from faculty_profiles collection (this is our main ranking)
+        debug(f"Querying profiles collection: {self.profiles_collection}")
         profile_nodes = self.profiles_manager.retriever.retrieve(search_query)
-        print(f"  Found {len(profile_nodes)} profile nodes")
+        info(f"Found {len(profile_nodes)} profile nodes")
+        verbose(f"Retrieved profile nodes: {[node.metadata.get('faculty_name', 'Unknown') for node in profile_nodes[:5]]}")
 
         # Convert profile nodes to FacultyMatch objects
         matches = []
-        for node in profile_nodes[:self.top_k]:
+        debug(f"Converting top {self.top_k} nodes to FacultyMatch objects...")
+        for i, node in enumerate(profile_nodes[:self.top_k], 1):
+            verbose(f"Processing node {i}/{min(self.top_k, len(profile_nodes))}: {node.metadata.get('faculty_name', 'Unknown')} (score: {getattr(node, 'score', 'N/A')})")
             match = self._node_to_faculty_match(node)
             matches.append(match)
+            debug(f"Match {i}: {match.faculty_name} (score: {match.score:.4f})")
 
         # Now query PDF store for each faculty to get supporting evidence
-        print(f"  Querying PDF store for supporting evidence...")
-        for match in matches:
+        info(f"Querying PDF store for supporting evidence for {len(matches)} faculty...")
+        for i, match in enumerate(matches, 1):
             faculty_id = match.metadata.get('faculty_id')
+            debug(f"Processing faculty {i}/{len(matches)}: {match.faculty_name} (ID: {faculty_id})")
             if faculty_id:
                 # Query PDFs collection with faculty_id filter
                 try:
+                    debug(f"Querying PDFs collection for faculty_id: {faculty_id}")
                     filters = MetadataFilters(
                         filters=[ExactMatchFilter(key="faculty_id", value=faculty_id)]
                     )
@@ -99,19 +115,27 @@ class FacultyRetriever:
                         filters=filters
                     )
                     pdf_nodes = pdf_retriever.retrieve(search_query)
+                    verbose(f"Found {len(pdf_nodes)} PDF nodes for faculty {faculty_id}")
 
                     if pdf_nodes:
                         pdf_support_list = []
                         for pdf_node in pdf_nodes:
-                            pdf_support_list.append(self._extract_pdf_support(pdf_node))
+                            pdf_support = self._extract_pdf_support(pdf_node)
+                            pdf_support_list.append(pdf_support)
+                            verbose(f"PDF support: {pdf_support.get('type', 'unknown')} - {pdf_support.get('faculty_name', 'N/A')}")
                         match.pdf_support = pdf_support_list
+                        debug(f"Added {len(pdf_support_list)} PDF support documents for {match.faculty_name}")
+                    else:
+                        debug(f"No PDF nodes found for faculty {faculty_id}")
                 except Exception as e:
-                    print(f"    ⚠ Error retrieving PDFs for {faculty_id}: {e}")
+                    warning(f"Error retrieving PDFs for {faculty_id}: {e}")
+                    verbose(f"PDF retrieval exception: {type(e).__name__}: {str(e)}")
 
-        print(f"✓ Retrieved {len(matches)} faculty matches with PDF evidence")
+        info(f"Retrieved {len(matches)} faculty matches with PDF evidence")
         if any(m.pdf_support for m in matches):
             pdf_count = sum(1 for m in matches if m.pdf_support)
-            print(f"  {pdf_count} faculty have supporting PDF documents")
+            debug(f"{pdf_count} faculty have supporting PDF documents")
+            verbose(f"PDF support distribution: {[(m.faculty_name, len(m.pdf_support) if m.pdf_support else 0) for m in matches if m.pdf_support]}")
 
         return matches
 
@@ -128,25 +152,34 @@ class FacultyRetriever:
             List[FacultyMatch]: List of matched faculty profiles with PDF support.
         """
         k = top_k or self.top_k
-        print(f"Retrieving top {k} faculty matches for query...")
+        info(f"Retrieving top {k} faculty matches for query: '{query[:60]}...'")
+        debug(f"Query: {query}")
+        verbose(f"Full query text: {query}")
 
         # Retrieve from faculty_profiles collection (this is our main ranking)
+        debug(f"Querying profiles collection: {self.profiles_collection}")
         profile_nodes = self.profiles_manager.retriever.retrieve(query)
-        print(f"  Found {len(profile_nodes)} profile nodes")
+        info(f"Found {len(profile_nodes)} profile nodes")
+        verbose(f"Top profile matches: {[f\"{node.metadata.get('faculty_name', 'Unknown')} ({getattr(node, 'score', 'N/A')})\" for node in profile_nodes[:5]]}")
 
         # Convert profile nodes to FacultyMatch objects
         matches = []
-        for node in profile_nodes[:k]:
+        debug(f"Converting top {k} nodes to FacultyMatch objects...")
+        for i, node in enumerate(profile_nodes[:k], 1):
+            verbose(f"Processing node {i}/{min(k, len(profile_nodes))}: {node.metadata.get('faculty_name', 'Unknown')}")
             match = self._node_to_faculty_match(node)
             matches.append(match)
+            debug(f"Match {i}: {match.faculty_name} (score: {match.score:.4f}, source: {match.source_type})")
 
         # Now query PDF store for each faculty to get supporting evidence
-        print(f"  Querying PDF store for supporting evidence...")
-        for match in matches:
+        info(f"Querying PDF store for supporting evidence for {len(matches)} faculty...")
+        for i, match in enumerate(matches, 1):
             faculty_id = match.metadata.get('faculty_id')
+            debug(f"Processing faculty {i}/{len(matches)}: {match.faculty_name} (ID: {faculty_id})")
             if faculty_id:
                 # Query PDFs collection with faculty_id filter
                 try:
+                    debug(f"Querying PDFs collection for faculty_id: {faculty_id}")
                     filters = MetadataFilters(
                         filters=[ExactMatchFilter(key="faculty_id", value=faculty_id)]
                     )
@@ -155,19 +188,27 @@ class FacultyRetriever:
                         filters=filters
                     )
                     pdf_nodes = pdf_retriever.retrieve(query)
+                    verbose(f"Found {len(pdf_nodes)} PDF nodes for faculty {faculty_id}")
 
                     if pdf_nodes:
                         pdf_support_list = []
                         for pdf_node in pdf_nodes:
-                            pdf_support_list.append(self._extract_pdf_support(pdf_node))
+                            pdf_support = self._extract_pdf_support(pdf_node)
+                            pdf_support_list.append(pdf_support)
+                            verbose(f"PDF support: {pdf_support.get('type', 'unknown')}")
                         match.pdf_support = pdf_support_list
+                        debug(f"Added {len(pdf_support_list)} PDF support documents for {match.faculty_name}")
+                    else:
+                        debug(f"No PDF nodes found for faculty {faculty_id}")
                 except Exception as e:
-                    print(f"    ⚠ Error retrieving PDFs for {faculty_id}: {e}")
+                    warning(f"Error retrieving PDFs for {faculty_id}: {e}")
+                    verbose(f"PDF retrieval exception: {type(e).__name__}: {str(e)}")
 
-        print(f"✓ Retrieved {len(matches)} faculty matches with PDF evidence")
+        info(f"Retrieved {len(matches)} faculty matches with PDF evidence")
         if any(m.pdf_support for m in matches):
             pdf_count = sum(1 for m in matches if m.pdf_support)
-            print(f"  {pdf_count} faculty have supporting PDF documents")
+            debug(f"{pdf_count} faculty have supporting PDF documents")
+            verbose(f"Matches with PDF support: {[(m.faculty_name, len(m.pdf_support) if m.pdf_support else 0) for m in matches if m.pdf_support]}")
 
         return matches
 
