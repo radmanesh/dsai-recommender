@@ -228,11 +228,26 @@ def load_pdfs_from_directory(pdf_dir: str = None, extract_metadata: bool = None)
             faculty_id = None
             if faculty_name:
                 debug(f"Mapping faculty name '{faculty_name}' to faculty_id...")
+                verbose(f"Available CSV names: {list(faculty_name_to_id.keys())[:5]}...")
                 faculty_id = map_name_to_faculty_id(faculty_name, faculty_name_to_id)
                 if faculty_id:
-                    debug(f"Mapped to faculty_id: {faculty_id}")
+                    debug(f"Mapped '{faculty_name}' to faculty_id: {faculty_id}")
                 else:
                     warning(f"Could not map faculty name '{faculty_name}' to faculty_id")
+                    verbose(f"Tried matching against {len(faculty_name_to_id)} CSV names")
+                    # Try to find close matches for debugging
+                    from src.utils.name_matcher import normalize_faculty_name
+                    norm_pdf_name = normalize_faculty_name(faculty_name)
+                    close_matches = []
+                    for csv_name in faculty_name_to_id.keys():
+                        norm_csv_name = normalize_faculty_name(csv_name)
+                        # Check if last names match
+                        pdf_words = norm_pdf_name.split()
+                        csv_words = norm_csv_name.split()
+                        if pdf_words and csv_words and pdf_words[-1] == csv_words[-1]:
+                            close_matches.append(csv_name)
+                    if close_matches:
+                        verbose(f"Close matches (same last name): {close_matches[:3]}")
 
             # Apply metadata to all documents in this group
             verbose(f"Applying metadata to {len(doc_group)} document pages...")

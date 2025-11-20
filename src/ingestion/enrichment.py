@@ -276,6 +276,7 @@ def get_pdf_nodes_by_faculty(
     """
     from llama_index.core import VectorStoreIndex
     from llama_index.vector_stores.chroma import ChromaVectorStore
+    from llama_index.core.vector_stores import MetadataFilters, ExactMatchFilter
     from src.models.embeddings import get_embedding_model
 
     # Create vector store and index for PDFs
@@ -296,11 +297,14 @@ def get_pdf_nodes_by_faculty(
     for i, faculty_id in enumerate(faculty_ids, 1):
         debug(f"Querying PDFs for faculty {i}/{len(faculty_ids)}: {faculty_id}")
 
-        # Create a retriever with metadata filter
+        # Create a retriever with metadata filter using proper format
         verbose(f"Creating retriever with filter: faculty_id={faculty_id}, top_k={top_k_per_faculty}")
+        filters = MetadataFilters(
+            filters=[ExactMatchFilter(key="faculty_id", value=faculty_id)]
+        )
         retriever = pdf_index.as_retriever(
             similarity_top_k=top_k_per_faculty,
-            filters={"faculty_id": faculty_id}
+            filters=filters
         )
 
         # Query with a generic prompt (the filter does the real work)

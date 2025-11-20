@@ -58,7 +58,7 @@ class Config:
     # Debug Configuration
     # Debug levels: ERROR=0, WARNING=1, INFO=2, DEBUG=3, VERBOSE=4
     # Can be set as integer (0-4) or string ("ERROR", "WARNING", "INFO", "DEBUG", "VERBOSE")
-    DEBUG_LEVEL = os.getenv("DEBUG_LEVEL", "VERBOSE").upper()
+    DEBUG_LEVEL = os.getenv("DEBUG_LEVEL", "DEBUG").upper()
 
     @classmethod
     def validate(cls):

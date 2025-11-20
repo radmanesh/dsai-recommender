@@ -89,14 +89,49 @@ def names_match(name1: Optional[str], name2: Optional[str]) -> bool:
     if norm1 == norm2:
         return True
 
+    # Split into words
+    words1 = norm1.split()
+    words2 = norm2.split()
+
+    # If both have at least 2 words, check last name match and first name similarity
+    if len(words1) >= 2 and len(words2) >= 2:
+        # Last names must match exactly (after normalization)
+        last1 = words1[-1]
+        last2 = words2[-1]
+
+        if last1 == last2:
+            # Last names match, now check first names
+            first1 = words1[0]
+            first2 = words2[0]
+
+            # Direct first name match
+            if first1 == first2:
+                return True
+
+            # Check for common spelling variations (e.g., Dimitrios vs Dimitris)
+            # Calculate similarity: if one is a prefix of the other and length difference <= 2
+            if len(first1) >= 3 and len(first2) >= 3:
+                if first1.startswith(first2[:3]) or first2.startswith(first1[:3]):
+                    # Check if they're similar (Levenshtein-like: same first 3 chars)
+                    if abs(len(first1) - len(first2)) <= 2:
+                        return True
+
+            # If last name matches and first names are similar length, consider it a match
+            # This handles cases like "Dimitrios" vs "Dimitris"
+            if abs(len(first1) - len(first2)) <= 2 and min(len(first1), len(first2)) >= 4:
+                # Check if they share at least 4 characters from the start
+                min_len = min(len(first1), len(first2))
+                if first1[:min_len] == first2[:min_len]:
+                    return True
+
     # Check if one is a subset of the other (handles cases like "John Doe" vs "John Michael Doe")
-    words1 = set(norm1.split())
-    words2 = set(norm2.split())
+    set1 = set(words1)
+    set2 = set(words2)
 
     # If one set of words is a subset of the other, consider it a match
     # (but require at least 2 words to match to avoid false positives)
-    if len(words1) >= 2 and len(words2) >= 2:
-        if words1.issubset(words2) or words2.issubset(words1):
+    if len(set1) >= 2 and len(set2) >= 2:
+        if set1.issubset(set2) or set2.issubset(set1):
             return True
 
     return False

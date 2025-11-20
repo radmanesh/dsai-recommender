@@ -120,7 +120,13 @@ def map_name_to_faculty_id(
     if not faculty_name:
         return None
 
-    # Try to find a matching name in the CSV data
+    # Try exact match first (case-insensitive)
+    faculty_name_lower = faculty_name.strip().lower()
+    for csv_name, faculty_id in csv_faculty_data.items():
+        if csv_name.strip().lower() == faculty_name_lower:
+            return faculty_id
+
+    # Try normalized matching
     for csv_name, faculty_id in csv_faculty_data.items():
         if names_match(faculty_name, csv_name):
             return faculty_id
