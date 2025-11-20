@@ -46,8 +46,8 @@ class Config:
 
     # Retrieval Configuration
     TOP_K_RESULTS = int(os.getenv("TOP_K_RESULTS", "10"))
-    CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "1024"))
-    CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "128"))
+    CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "2045"))
+    CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "512"))
 
     # Ingestion Configuration
     # ChromaDB has a max batch size limit (typically ~5461), so we use a safe batch size
@@ -58,7 +58,7 @@ class Config:
     # Debug Configuration
     # Debug levels: ERROR=0, WARNING=1, INFO=2, DEBUG=3, VERBOSE=4
     # Can be set as integer (0-4) or string ("ERROR", "WARNING", "INFO", "DEBUG", "VERBOSE")
-    DEBUG_LEVEL = os.getenv("DEBUG_LEVEL", "DEBUG").upper()
+    DEBUG_LEVEL = os.getenv("DEBUG_LEVEL", "VERBOSE").upper()
 
     @classmethod
     def validate(cls):

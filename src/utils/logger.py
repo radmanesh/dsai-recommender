@@ -82,7 +82,10 @@ def _setup_logger(name: str) -> logging.Logger:
 
 def _get_debug_level() -> DebugLevel:
     """Get debug level from Config."""
-    debug_level_str = os.getenv("DEBUG_LEVEL", "INFO").upper()
+    # Import Config here to avoid circular imports
+    from src.utils.config import Config
+
+    debug_level_str = Config.DEBUG_LEVEL
 
     # Try to parse as enum name
     try:
@@ -98,7 +101,7 @@ def _get_debug_level() -> DebugLevel:
     except ValueError:
         pass
 
-    # Default to INFO
+    # Default to INFO (should match Config default, but this is fallback)
     return DebugLevel.INFO
 
 
